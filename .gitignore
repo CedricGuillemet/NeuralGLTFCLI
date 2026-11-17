@@ -4,3 +4,5 @@ out/
 !tests/**/*.glb
 *_png/
 .vs/
+assets/
+output/

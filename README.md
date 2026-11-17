@@ -42,6 +42,18 @@ cmake --build build
 
 The default CUDA targets are Turing, Ampere, Ada and Blackwell (`75-real 86-real 89-real 120`); override with `-DCMAKE_CUDA_ARCHITECTURES=...`.
 
+## Results
+
+Sizes in bytes, with the default settings (6000 training steps for neural):
+
+| Asset | Input | KTX2 | Neural |
+|---|---:|---:|---:|
+| [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,030,320 (56.5%) | 13,078,600 (23.8%) |
+| [BoomBox](https://playground.babylonjs.com/#QCU8DJ#2) | 11,249,720 | 3,878,440 (34.5%) | 2,569,928 (22.8%) |
+| [aerobatic_plane](https://playground.babylonjs.com/#5NIBE1#207) | 4,616,664 | 4,308,824 (93.3%) | 4,192,848 (90.8%) |
+| [fish](https://playground.babylonjs.com/#9CMU0F#38) | 47,570,100 | pending | pending |
+| [haunted_house](https://playground.babylonjs.com/#E8UGIC#20) | 38,976,908 | pending | pending |
+
 ## Neural codec
 
 `babylon-ntc-v1` is a C++/CUDA port of a PyTorch prototype. For each material it trains two 8-channel latent grids (at 1/4 and 1/16 of the texture resolution) and a 24 -> 32 -> 32 -> 9 ReLU MLP:
