@@ -1,0 +1,158 @@
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#include "gltf_io.h"
+#include "passes.h"
+
+namespace fs = std::filesystem;
+using namespace gtc;
+
+namespace {
+
+void printUsage() {
+    std::printf(
+        "gltf-texture-compressor %s\n"
+        "Re-encodes the textures of a glTF/GLB asset as KTX2 (Basis Universal) or neural textures.\n\n"
+        "Usage: gltf-texture-compressor <input.gltf|input.glb> [options]\n\n"
+        "Options:\n"
+        "  -f, --format <list>        ktx, neural or ktx,neural (default: ktx)\n"
+        "  -o, --output-dir <dir>     output directory (default: next to the input)\n"
+        "      --png [dir]            also write the re-compressed textures (and the originals) as PNG\n"
+        "                             for quality comparison (default dir: <output-dir>/<name>_png)\n"
+        "  -h, --help                 show this help\n"
+        "      --version              print the version\n\n"
+        "KTX2 options:\n"
+        "      --etc1s-quality <n>    ETC1S quality for color textures, 1-255 (default 255)\n"
+        "      --uastc-level <n>      UASTC level for non-color textures, 0-4 (default 2)\n"
+        "      --uastc-rdo <x>        UASTC rate-distortion quality scalar, 0 disables (default 1.0)\n"
+        "      --zstd <n>             Zstandard level for UASTC textures, 0 disables (default 18)\n"
+        "      --uastc-color          use UASTC for color textures too (higher quality, larger)\n\n"
+        "Neural options (requires an NVIDIA GPU):\n"
+        "      --neural-codec <name>  codec (default babylon-ntc-v1)\n"
+        "      --steps <n>            training steps per material (default 6000)\n"
+        "      --batch <n>            samples per step (default 131072)\n"
+        "      --seed <n>             random seed (default 1)\n"
+        "      --cuda-device <n>      CUDA device index (default 0)\n"
+        "      --neural-fallback-size <n>\n"
+        "                             keep downscaled original textures (max width n) for loaders without\n"
+        "                             BABYLON_materials_neural_texture support (default: 1x1 placeholders)\n\n"
+        "Outputs are written as <name>_ktx.glb and <name>_neural.glb.\n",
+        GTC_VERSION);
+}
+
+bool parseInt(const char* s, int& out) {
+    char* end = nullptr;
+    long v = std::strtol(s, &end, 10);
+    if (!end || *end) return false;
+    out = int(v);
+    return true;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::string input, outDir, pngDir, formats = "ktx";
+    bool png = false;
+    KtxOptions ktxOpts;
+    NeuralOptions nOpts;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&](const char* what) -> const char* {
+            if (i + 1 >= argc) {
+                std::fprintf(stderr, "error: %s expects %s\n", a.c_str(), what);
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        auto nextInt = [&](int& v) {
+            if (!parseInt(next("an integer"), v)) {
+                std::fprintf(stderr, "error: %s expects an integer\n", a.c_str());
+                std::exit(2);
+            }
+        };
+        if (a == "-h" || a == "--help") { printUsage(); return 0; }
+        else if (a == "--version") { std::printf("%s\n", GTC_VERSION); return 0; }
+        else if (a == "-f" || a == "--format") formats = next("a format list");
+        else if (a == "-o" || a == "--output-dir") outDir = next("a directory");
+        else if (a == "--png") {
+            png = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') pngDir = argv[++i];
+        }
+        else if (a == "--etc1s-quality") nextInt(ktxOpts.etc1sQuality);
+        else if (a == "--uastc-level") nextInt(ktxOpts.uastcLevel);
+        else if (a == "--uastc-rdo") ktxOpts.uastcRdo = float(std::atof(next("a number")));
+        else if (a == "--zstd") nextInt(ktxOpts.zstdLevel);
+        else if (a == "--uastc-color") ktxOpts.uastcForColor = true;
+        else if (a == "--neural-codec") nOpts.codec = next("a codec name");
+        else if (a == "--steps") nextInt(nOpts.steps);
+        else if (a == "--batch") nextInt(nOpts.batch);
+        else if (a == "--seed") { int s; nextInt(s); nOpts.seed = uint32_t(s); }
+        else if (a == "--cuda-device") nextInt(nOpts.cudaDevice);
+        else if (a == "--neural-fallback-size") nextInt(nOpts.fallbackSize);
+        else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown option %s (see --help)\n", a.c_str()); return 2; }
+        else if (input.empty()) input = a;
+        else { std::fprintf(stderr, "error: unexpected argument %s\n", a.c_str()); return 2; }
+    }
+    if (input.empty()) { printUsage(); return 2; }
+
+    bool doKtx = false, doNeural = false;
+    for (size_t s = 0; s <= formats.size();) {
+        size_t e = formats.find(',', s);
+        if (e == std::string::npos) e = formats.size();
+        std::string f = formats.substr(s, e - s);
+        if (f == "ktx" || f == "ktx2") doKtx = true;
+        else if (f == "neural") doNeural = true;
+        else { std::fprintf(stderr, "error: unknown format '%s' (expected ktx or neural)\n", f.c_str()); return 2; }
+        s = e + 1;
+    }
+    if (nOpts.steps < 1 || nOpts.batch < 64) { std::fprintf(stderr, "error: --steps must be >= 1 and --batch >= 64\n"); return 2; }
+
+    const fs::path inPath = toPath(input);
+    const std::string stem = fromPath(inPath.stem());
+    const fs::path out = outDir.empty() ? inPath.parent_path() : toPath(outDir);
+    if (!out.empty()) fs::create_directories(out);
+    if (png && pngDir.empty()) pngDir = fromPath(out / (stem + "_png"));
+
+    auto t0 = std::chrono::steady_clock::now();
+    std::printf("Loading %s\n", input.c_str());
+    Document doc;
+    LoadResult info;
+    std::string err;
+    if (!loadDocument(input, doc, info, err)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+    std::printf("  %zu materials, %zu textures, %zu images, input size %llu bytes (%s)\n", doc.model.materials.size(),
+                doc.model.textures.size(), doc.model.images.size(), (unsigned long long)info.inputBytes,
+                humanBytes(info.inputBytes).c_str());
+
+    struct Report { std::string format, path; uint64_t bytes; double seconds; };
+    std::vector<Report> reports;
+    auto run = [&](const std::string& format, auto&& pass) -> bool {
+        std::printf("\n== %s ==\n", format.c_str());
+        auto ts = std::chrono::steady_clock::now();
+        Document copy = doc;
+        const std::string png = pngDir.empty() ? std::string() : pngDir;
+        if (!pass(copy, png)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return false; }
+        const fs::path file = out / (stem + "_" + format + ".glb");
+        std::printf("  writing %s\n", fromPath(file).c_str());
+        if (!saveGlb(std::move(copy), fromPath(file), err)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return false; }
+        const uint64_t bytes = fs::file_size(file);
+        reports.push_back({format, fromPath(file), bytes, secondsSince(ts)});
+        std::printf("  output size %llu bytes (%s), %.1f s\n", (unsigned long long)bytes, humanBytes(bytes).c_str(), secondsSince(ts));
+        return true;
+    };
+
+    if (doKtx && !run("ktx", [&](Document& d, const std::string& p) { return runKtxPass(d, ktxOpts, p, err); })) return 1;
+    if (doNeural && !run("neural", [&](Document& d, const std::string& p) { return runNeuralPass(d, nOpts, p, err); })) return 1;
+
+    std::printf("\nSummary\n  input   %12llu bytes  %s\n", (unsigned long long)info.inputBytes, input.c_str());
+    for (auto& r : reports)
+        std::printf("  %-7s %12llu bytes  %s  (%.1f%% of input, %.1f s)\n", r.format.c_str(), (unsigned long long)r.bytes,
+                    r.path.c_str(), 100.0 * double(r.bytes) / double(info.inputBytes), r.seconds);
+    if (png) std::printf("  PNG textures in %s\n", pngDir.c_str());
+    std::printf("Done in %.1f s\n", secondsSince(t0));
+    return 0;
+}

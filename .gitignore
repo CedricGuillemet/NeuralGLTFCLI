@@ -1,0 +1,6 @@
+build/
+out/
+*.glb
+!tests/**/*.glb
+*_png/
+.vs/
