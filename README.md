@@ -44,15 +44,15 @@ The default CUDA targets are Turing, Ampere, Ada and Blackwell (`75-real 86-real
 
 ## Results
 
-Sizes in bytes, with the default settings (6000 training steps for neural):
+Sizes in bytes, with the default settings (6000 training steps for neural). Times are wall-clock encoding times: KTX2 on an AMD Ryzen 9 5900X (CPU), neural on an NVIDIA RTX 4060 (GPU).
 
-| Asset | Input | KTX2 | Neural | Neural coverage |
-|---|---:|---:|---:|---|
-| [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,006,336 (56.5%) | 13,078,600 (23.8%) | 5 full PBR sets (base color, normal, occlusion, roughness/metallic) |
-| [BoomBox](https://playground.babylonjs.com/#QCU8DJ#2) | 11,249,720 | 3,840,832 (34.1%) | 2,583,640 (23.0%) | 1 full PBR set |
-| [aerobatic_plane](https://playground.babylonjs.com/#5NIBE1#207) | 4,616,664 | 4,310,560 (93.4%) | 4,192,848 (90.8%) | 1 partial set (normal + occlusion only) |
-| [fish](https://playground.babylonjs.com/#9CMU0F#38) | 47,570,100 | 22,412,308 (47.1%) | 45,852,732 (96.4%) | 4 partial sets (normal + occlusion only) |
-| [haunted_house](https://playground.babylonjs.com/#E8UGIC#20) | 38,976,908 | 12,822,392 (32.9%) | 19,518,400 (50.1%) | 2 full PBR sets |
+| Asset | Input | KTX2 | Neural | Time KTX2 / Neural | Neural coverage |
+|---|---:|---:|---:|---:|---|
+| [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,006,336 (56.5%) | 13,078,600 (23.8%) | 181.0 s / 89.2 s | 5 full PBR sets (base color, normal, occlusion, roughness/metallic) |
+| [BoomBox](https://playground.babylonjs.com/#QCU8DJ#2) | 11,249,720 | 3,840,832 (34.1%) | 2,583,640 (23.0%) | 45.8 s / 18.8 s | 1 full PBR set |
+| [aerobatic_plane](https://playground.babylonjs.com/#5NIBE1#207) | 4,616,664 | 4,310,560 (93.4%) | 4,192,848 (90.8%) | 26.8 s / 17.6 s | 1 partial set (normal + occlusion only) |
+| [fish](https://playground.babylonjs.com/#9CMU0F#38) | 47,570,100 | 22,412,308 (47.1%) | 45,852,732 (96.4%) | 84.0 s / 71.2 s | 4 partial sets (normal + occlusion only) |
+| [haunted_house](https://playground.babylonjs.com/#E8UGIC#20) | 38,976,908 | 12,822,392 (32.9%) | 19,518,400 (50.1%) | 85.1 s / 39.9 s | 2 full PBR sets |
 
 Neural results depend on how many texture slots of a material the network replaces. All channels of a material share one latent set (about 2.13 MiB at 2048x2048), so a full PBR set is stored for the price of one latent set and the network can exploit the correlation between channels. That is the likely reason full sets compress well (not measured separately). Materials with only normal and occlusion textures (aerobatic_plane, fish) pay the same fixed latent cost for just two slots, and their base color images are left untouched, so the file barely shrinks.
 
