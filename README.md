@@ -48,11 +48,11 @@ Sizes in bytes, with the default settings (6000 training steps for neural):
 
 | Asset | Input | KTX2 | Neural |
 |---|---:|---:|---:|
-| [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,030,320 (56.5%) | 13,078,600 (23.8%) |
-| [BoomBox](https://playground.babylonjs.com/#QCU8DJ#2) | 11,249,720 | 3,878,440 (34.5%) | 2,569,928 (22.8%) |
-| [aerobatic_plane](https://playground.babylonjs.com/#5NIBE1#207) | 4,616,664 | 4,308,824 (93.3%) | 4,192,848 (90.8%) |
-| [fish](https://playground.babylonjs.com/#9CMU0F#38) | 47,570,100 | pending | pending |
-| [haunted_house](https://playground.babylonjs.com/#E8UGIC#20) | 38,976,908 | pending | pending |
+| [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,006,336 (56.5%) | 13,078,600 (23.8%) |
+| [BoomBox](https://playground.babylonjs.com/#QCU8DJ#2) | 11,249,720 | 3,840,832 (34.1%) | 2,583,640 (23.0%) |
+| [aerobatic_plane](https://playground.babylonjs.com/#5NIBE1#207) | 4,616,664 | 4,310,560 (93.4%) | 4,192,848 (90.8%) |
+| [fish](https://playground.babylonjs.com/#9CMU0F#38) | 47,570,100 | 22,412,308 (47.1%) | 45,852,732 (96.4%) |
+| [haunted_house](https://playground.babylonjs.com/#E8UGIC#20) | 38,976,908 | 12,822,392 (32.9%) | 19,518,400 (50.1%) |
 
 ## Neural codec
 
