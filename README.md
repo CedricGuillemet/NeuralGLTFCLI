@@ -56,6 +56,35 @@ Sizes in bytes, with the default settings (6000 training steps for neural):
 
 Neural results depend on how many texture slots of a material the network replaces. All channels of a material share one latent set (about 2.13 MiB at 2048x2048), so a full PBR set is stored for the price of one latent set and the network can exploit the correlation between channels. That is the likely reason full sets compress well (not measured separately). Materials with only normal and occlusion textures (aerobatic_plane, fish) pay the same fixed latent cost for just two slots, and their base color images are left untouched, so the file barely shrinks.
 
+## Neural quality and size
+
+The size of a neural material is fixed by the codec layout, not by the content: two 8-channel latent grids at 1/4 and 1/16 of the texture resolution, stored as raw 8-bit values. For a 2048x2048 material that is 512x512x8 + 128x128x8 bytes = 2.13 MiB, plus about 8 KiB of MLP weights, whatever the textures contain. Measured PSNR on the results above ranges from about 26 dB to 58 dB per channel, with most channels between 30 and 45 dB.
+
+Settings available today:
+
+| Option | Effect |
+|---|---|
+| `--steps` (default 6000), `--batch` (default 131072) | More training steps or a larger batch improve PSNR. The file size does not change. |
+| `--seed` | Only changes run-to-run variation. |
+| `--neural-fallback-size <n>` | Keeps downscaled originals in the replaced slots for viewers without the extension. This makes the file larger. |
+
+The size/quality balance itself is set by compile-time constants in `src/neural/ntc_cuda.h`:
+
+| Constant | Current value | Effect |
+|---|---|---|
+| `kHiDiv`, `kLoDiv` | 4, 16 | Latent grid resolution divisors. Larger values give smaller files and lower quality. |
+| `kLatentChannels` | 8 | Channels per latent grid. Fewer channels give smaller files and lower quality. |
+| `kHidden` | 32 | MLP width. The weights are only about 8 KiB, so this mostly affects decode cost, not file size. |
+
+Changing these requires a rebuild, and files written with different values are not compatible with the current `babylon-ntc-v1` layout.
+
+Possible improvements, not implemented yet:
+
+- A `--quality` / `--latent-div` option exposing the latent resolution.
+- Lower latent bit depth (for example 6 or 4 bits) and entropy coding (zstd or bit packing) of the latents.
+- A `--latent-channels` option.
+- Skipping materials that have too few PBR slots to amortize the fixed latent cost (see the coverage column above).
+
 ## Neural codec
 
 `babylon-ntc-v1` is a C++/CUDA port of a PyTorch prototype. For each material it trains two 8-channel latent grids (at 1/4 and 1/16 of the texture resolution) and a 24 -> 32 -> 32 -> 9 ReLU MLP:
