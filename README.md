@@ -46,6 +46,7 @@ The default CUDA targets are Turing, Ampere, Ada and Blackwell (`75-real 86-real
 
 Sizes in bytes, with the default settings (6000 training steps for neural). Times are wall-clock encoding times: KTX2 on an AMD Ryzen 9 5900X (CPU), neural on an NVIDIA RTX 4060 (GPU).
 
+All neural results were produced on an NVIDIA GeForce RTX 4060.
 | Asset | Input | KTX2 | Neural | Time KTX2 / Neural | Neural coverage |
 |---|---:|---:|---:|---:|---|
 | [FlightHelmet](https://playground.babylonjs.com/#BVK9I0#102) | 54,913,288 | 31,006,336 (56.5%) | 13,078,600 (23.8%) | 181.0 s / 89.2 s | 5 full PBR sets (base color, normal, occlusion, roughness/metallic) |
