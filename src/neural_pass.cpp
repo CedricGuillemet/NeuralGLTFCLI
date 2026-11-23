@@ -9,7 +9,9 @@
 #include "gltf_io.h"
 #include "image.h"
 #include "neural/codec.h"
+#include "neural/preset.h"
 #include "passes.h"
+#include "uv_mask.h"
 
 #ifndef GTC_GIT_SHA
 #define GTC_GIT_SHA "unknown"
@@ -25,7 +27,8 @@ using tinygltf::Value;
 
 constexpr const char* kExtension = "BABYLON_materials_neural_texture";
 constexpr const char* kSpecGlossExtension = "KHR_materials_pbrSpecularGlossiness";
-constexpr int GL_LINEAR = 9729, GL_LINEAR_MIPMAP_LINEAR = 9987, GL_REPEAT = 10497;
+constexpr int GL_NEAREST = 9728, GL_LINEAR = 9729, GL_LINEAR_MIPMAP_LINEAR = 9987, GL_REPEAT = 10497;
+constexpr int kMaskDilate = 4; // texels added around the UV islands
 constexpr int kMinNeuralSize = 64; // smaller materials cost more in weights and latents than they save
 
 // Loss weight per canonical channel (see NeuralChannel).
@@ -162,6 +165,23 @@ double psnr(const std::vector<float>& a, const std::vector<float>& b, size_t tex
 }
 
 uint8_t toU8(float v) { return uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); }
+
+// PSNR over the texels where mask is set.
+double psnrMasked(const std::vector<float>& a, const std::vector<float>& b, const std::vector<uint8_t>& mask, int stride, int start, int count) {
+    double se = 0;
+    size_t covered = 0;
+    for (size_t i = 0; i < mask.size(); ++i) {
+        if (!mask[i]) continue;
+        ++covered;
+        for (int c = start; c < start + count; ++c) {
+            double d = std::clamp(a[i * stride + c], 0.0f, 1.0f) - b[i * stride + c];
+            se += d * d;
+        }
+    }
+    if (!covered) return 99.0;
+    double mse = se / (double(covered) * count);
+    return mse <= 1e-12 ? 99.0 : 10.0 * std::log10(1.0 / mse);
+}
 
 // Z of a unit normal stored as XY in [0,1], remapped to [0,1].
 float normalZ(float nx, float ny) {
@@ -375,6 +395,8 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
     const bool v2 = codec->name() != "babylon-ntc-v1";
     const bool specGloss = opts.specGloss != "ignore";
     const std::string tag = opts.tag.empty() ? "neural" : opts.tag;
+    NeuralPreset preset;
+    if (!resolveNeuralPreset(opts, preset, err)) return false;
     std::printf("  codec %s on %s\n", codec->name().c_str(), codec->deviceDescription().c_str());
 
     auto& m = doc.model;
@@ -384,8 +406,10 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
     if (!pngDir.empty()) {
         fs::create_directories(toPath(pngDir) / "original");
         fs::create_directories(toPath(pngDir) / tag);
+        fs::create_directories(toPath(pngDir) / "mask");
     }
     const int latentSampler = doc.addSampler(GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR, GL_REPEAT, GL_REPEAT);
+    const int pointSampler = doc.addSampler(GL_NEAREST, GL_NEAREST, GL_REPEAT, GL_REPEAT);
     Placeholders ph{doc, doc.addSampler(GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR, GL_REPEAT, GL_REPEAT)};
     std::map<int, Image> decodedCache;
     auto loadTexture = [&](int tex, Image& out) -> bool {
@@ -517,7 +541,22 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         in.height = h;
         in.outputs = N;
         in.layout = layout;
-        for (int i = 0; i < N; ++i) in.lossWeights[i] = ch.list[i].active ? kLossWeights[layout.canonical[i]] : 0.0f;
+        for (int i = 0; i < N; ++i) {
+            const int cn = layout.canonical[i];
+            const float lw = preset.lossWeight[cn] >= 0.0f ? preset.lossWeight[cn] : kLossWeights[cn];
+            in.lossWeights[i] = ch.list[i].active ? lw : 0.0f;
+        }
+        std::vector<uint8_t> uvMask;
+        const bool haveUvMask = buildUvMask(m, int(mi), w, h, kMaskDilate, uvMask);
+        double uvCoverage = 1.0;
+        if (haveUvMask) {
+            size_t covered = 0;
+            for (uint8_t v : uvMask) covered += v ? 1 : 0;
+            uvCoverage = double(covered) / double(uvMask.size());
+            if (preset.uvMask) in.uvMask = uvMask;
+        } else {
+            uvMask.assign(size_t(w) * h, 1);
+        }
         if (codec->usesWorkDir() && !opts.workDir.empty()) {
             in.workDir = fromPath(toPath(opts.workDir) / sanitizeFileName(std::to_string(mi) + "_" + label));
             fs::create_directories(toPath(in.workDir));
@@ -558,10 +597,11 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         for (size_t i = 0; i < res.latentImages.size(); ++i) {
             auto png = encodePng(res.latentImages[i], 4);
             latentBytes += png.size();
-            std::string nm = label + "_latent_" + (i < 4 ? kLatentNames[i] : std::to_string(i));
+            const std::string suffix = i < res.latentNames.size() ? res.latentNames[i] : i < 4 ? kLatentNames[i] : std::to_string(i);
+            std::string nm = label + "_latent_" + suffix;
             int img = doc.addImage(std::move(png), "image/png", nm);
             Value::Object ti;
-            ti["index"] = Value(doc.addTexture(img, latentSampler, nm));
+            ti["index"] = Value(doc.addTexture(img, res.latentPointSampling ? pointSampler : latentSampler, nm));
             latents.emplace_back(std::move(ti));
         }
         weightBytes = res.weights.size();
@@ -635,18 +675,21 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
 
         struct Psnr {
             const char* name;
-            double db;
+            double db, masked;
         };
         std::vector<Psnr> scores;
+        auto score = [&](const char* name, int start, int count) {
+            scores.push_back({name, psnr(res.decoded, in.target, n, N, start, count), psnrMasked(res.decoded, in.target, uvMask, N, start, count)});
+        };
         auto report = [&](const char* name, int g, int first, int count) {
             if (!ch.has(g) || !ch.list[ch.start[g]].active) return;
-            scores.push_back({name, psnr(res.decoded, in.target, n, N, ch.start[g] + first, count)});
+            score(name, ch.start[g] + first, count);
         };
         report("base", GBase, 0, 3);
         if (blend) report("alpha", GBase, 3, 1);
         report("normal", GNormal, 0, 2);
         report("occlusion", GOcc, 0, 1);
-        if (ch.has(GRough) && ch.has(GMetal)) scores.push_back({"roughness/metallic", psnr(res.decoded, in.target, n, N, ch.start[GRough], 2)});
+        if (ch.has(GRough) && ch.has(GMetal)) score("roughness/metallic", ch.start[GRough], 2);
         report("emissive", GEmissive, 0, 3);
         report("diffuse", GDiffuse, 0, 3);
         if (blend) report("diffuse alpha", GDiffuse, 3, 1);
@@ -684,9 +727,11 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
             mm["weightBytes"] = Value(double(weightBytes));
             mm["compressedBytes"] = Value(double(compressedBytes));
             mm["bpp"] = Value(8.0 * double(compressedBytes) / double(n));
-            Value::Object ps;
-            for (const Psnr& s : scores) ps[s.name] = Value(s.db);
+            Value::Object ps, psm;
+            for (const Psnr& s : scores) ps[s.name] = Value(s.db), psm[s.name] = Value(s.masked);
             mm["psnr"] = Value(std::move(ps));
+            mm["psnrMasked"] = Value(std::move(psm));
+            mm["uvCoverage"] = Value(uvCoverage);
             mm["encodeSeconds"] = Value(encodeSeconds);
             mm["bakeOnly"] = Value(bakeOnly);
             if (!res.extraMetrics.empty()) mm["codecMetrics"] = Value(res.extraMetrics);
@@ -697,6 +742,10 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
             const std::string prefix = sanitizeFileName(std::to_string(mi) + "_" + label);
             writeComparisonPngs(toPath(pngDir) / "original", prefix, in.target, N, w, h, ch, blend);
             writeComparisonPngs(toPath(pngDir) / tag, prefix, res.decoded, N, w, h, ch, blend);
+            Image maskImg{w, h};
+            maskImg.rgba.resize(n * 4);
+            for (size_t i = 0; i < n; ++i) maskImg.rgba[i * 4] = maskImg.rgba[i * 4 + 1] = maskImg.rgba[i * 4 + 2] = uvMask[i] ? 255 : 0, maskImg.rgba[i * 4 + 3] = 255;
+            writePng(fromPath(toPath(pngDir) / "mask" / (prefix + "_mask.png")), maskImg, 3);
         }
     }
     if (!anyBakeOnly) doc.addExtensionUsed(kExtension, false);
@@ -715,8 +764,8 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         root["tag"] = Value(tag);
         root["commandLine"] = Value(opts.commandLine);
         root["seed"] = Value(int(opts.seed));
-        root["steps"] = Value(opts.steps);
-        root["batch"] = Value(opts.batch);
+        root["steps"] = Value(preset.cfg.steps);
+        root["batch"] = Value(preset.cfg.batch);
         root["parameters"] = Value(codec->describeParameters());
         root["totalEncodeSeconds"] = Value(secondsSince(passStart));
         root["materials"] = Value(std::move(materialMetrics));

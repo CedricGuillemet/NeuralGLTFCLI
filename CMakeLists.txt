@@ -52,7 +52,17 @@ add_executable(gltf-texture-compressor
     src/neural_pass.cpp
     src/third_party_impl.cpp
     src/neural/babylon_ntc.cpp
-    src/neural/ntc_cuda.cu)
+    src/neural/preset.cpp
+    src/uv_mask.cpp
+    src/neural/ntc_cuda.cu
+    src/neural/ntc_shape_0.cu
+    src/neural/ntc_shape_1.cu
+    src/neural/ntc_shape_2.cu
+    src/neural/ntc_shape_3.cu
+    src/neural/ntc_shape_4.cu
+    src/neural/ntc_shape_5.cu
+    src/neural/ntc_shape_6.cu
+    src/neural/ntc_shape_7.cu)
 
 target_include_directories(gltf-texture-compressor PRIVATE src ${tinygltf_SOURCE_DIR})
 target_link_libraries(gltf-texture-compressor PRIVATE ktx)

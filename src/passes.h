@@ -32,6 +32,23 @@ struct NeuralOptions {
     uint32_t seed = 1;
     int cudaDevice = 0;
     int fallbackSize = 0; // 0: 1x1 flat placeholders, otherwise downscaled originals
+    bool stepsSet = false, batchSet = false; // --steps / --batch given explicitly (override the preset)
+
+    // Training levers (src/neural/preset.cpp). Empty / negative values come from the preset.
+    std::string preset = "v2best";   // v2, v2best, v3s, v3m, v3l, v3x
+    std::string grids;           // "div:channels:bits,..." e.g. "4:16:4,16:16:4"
+    int hidden = 0, hiddenLayers = 0;
+    std::string activation;      // relu, silu, hgelu
+    std::string uvMask;          // on, off
+    std::string sampling;        // continuous, texel, mixed:<p>
+    float importance = -1.0f;
+    std::string loss;            // l2, charbonnier
+    std::string lossWeights;     // "base=1.5,normal=3"
+    int finetuneSteps = -1;
+    float warmup = -1.0f;
+    float beta2 = -1.0f;
+    std::string finetuneLr;      // "1e-3" or "1e-3:1e-5" (cosine)
+    std::string quant;           // noise, ste
 
     // Output naming and extras. The pass writes nothing itself except the PNG folder, the work
     // directories and the optional files below; main() writes <stem>_<tag>.glb.

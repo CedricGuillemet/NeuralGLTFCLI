@@ -35,8 +35,20 @@ void printUsage() {
         "                             spec-gloss textures) or babylon-ntc-v1 (core metal-rough textures only)\n"
         "      --neural-specgloss <encode|ignore>\n"
         "                             v2: encode KHR_materials_pbrSpecularGlossiness textures (default) or leave them\n"
-        "      --steps <n>            training steps per material (default 6000)\n"
+        "      --steps <n>            training steps per material (default: preset; 24000 for v2best/v3*, 6000 for v2)\n"
         "      --batch <n>            samples per step (default 131072)\n"
+        "      --neural-preset <p>    v2best (default; v2 file format, tuned training), v2 (legacy training), v3s, v3m, v3l,\n"
+        "                             v3x (babylon-ntc-v3 file format); the flags below override a preset\n"
+        "      --neural-grids <list>  latent grids div:channels:bits,... (finest first), e.g. 4:16:4,16:16:4\n"
+        "      --neural-hidden <n>    MLP width; --neural-layers <n>: hidden layers\n"
+        "      --neural-activation <relu|silu|hgelu>\n"
+        "      --neural-uv-mask <on|off>   train on the texels covered by the mesh UVs\n"
+        "      --neural-sampling <continuous|texel|mixed:p>   texel-center sample probability\n"
+        "      --neural-importance <x>     0..1 gradient-energy sampling blend\n"
+        "      --neural-loss <l2|charbonnier>\n"
+        "      --neural-loss-weights <name=w,...>   base, alpha, normal, occlusion, roughness, metallic, ...\n"
+        "      --neural-finetune-steps <n>, --neural-finetune-lr <lr[:endLr]>, --neural-warmup <fraction>,\n"
+        "      --neural-beta2 <x>, --neural-quant <noise|ste>   optimizer and quantization\n"
         "      --seed <n>             random seed (default 1)\n"
         "      --cuda-device <n>      CUDA device index (default 0)\n"
         "      --neural-fallback-size <n>\n"
@@ -106,8 +118,23 @@ int main(int argc, char** argv) {
                 return 2;
             }
         }
-        else if (a == "--steps") nextInt(nOpts.steps);
-        else if (a == "--batch") nextInt(nOpts.batch);
+        else if (a == "--steps") { nextInt(nOpts.steps); nOpts.stepsSet = true; }
+        else if (a == "--batch") { nextInt(nOpts.batch); nOpts.batchSet = true; }
+        else if (a == "--neural-preset") nOpts.preset = next("a preset name");
+        else if (a == "--neural-grids") nOpts.grids = next("a grid list");
+        else if (a == "--neural-hidden") nextInt(nOpts.hidden);
+        else if (a == "--neural-layers") nextInt(nOpts.hiddenLayers);
+        else if (a == "--neural-activation") nOpts.activation = next("relu, silu or hgelu");
+        else if (a == "--neural-uv-mask") nOpts.uvMask = next("on or off");
+        else if (a == "--neural-sampling") nOpts.sampling = next("continuous, texel or mixed:<p>");
+        else if (a == "--neural-importance") nOpts.importance = float(std::atof(next("a number")));
+        else if (a == "--neural-loss") nOpts.loss = next("l2 or charbonnier");
+        else if (a == "--neural-loss-weights") nOpts.lossWeights = next("name=weight pairs");
+        else if (a == "--neural-finetune-steps") nextInt(nOpts.finetuneSteps);
+        else if (a == "--neural-finetune-lr") nOpts.finetuneLr = next("lr or lr:endLr");
+        else if (a == "--neural-warmup") nOpts.warmup = float(std::atof(next("a fraction")));
+        else if (a == "--neural-beta2") nOpts.beta2 = float(std::atof(next("a number")));
+        else if (a == "--neural-quant") nOpts.quant = next("noise or ste");
         else if (a == "--seed") { int s; nextInt(s); nOpts.seed = uint32_t(s); }
         else if (a == "--cuda-device") nextInt(nOpts.cudaDevice);
         else if (a == "--neural-fallback-size") nextInt(nOpts.fallbackSize);

@@ -2,8 +2,8 @@
 
 // Neural texture codec interface. A codec compresses the PBR texture set of one material
 // into latent images plus network weights stored in the BABYLON_materials_neural_texture
-// extension. "babylon-ntc-v1" (fixed 9 outputs) and "babylon-ntc-v2" (variable outputs) are
-// implemented; others (e.g. NVIDIA RTXNTC) can be added by implementing INeuralCodec and
+// extension. "babylon-ntc-v1" (fixed 9 outputs), "babylon-ntc-v2" (variable outputs) and
+// "babylon-ntc-v3" (configurable grids and MLP) are implemented; others (e.g. NVIDIA RTXNTC) can be added by implementing INeuralCodec and
 // registering it in createNeuralCodec.
 
 #include <memory>
@@ -33,7 +33,7 @@ enum NeuralChannel {
 constexpr int kMaxNeuralChannels = 20;
 constexpr int kV1NeuralChannels = 9;
 
-enum class NeuralCodecVersion { V1, V2 };
+enum class NeuralCodecVersion { V1, V2, V3 };
 
 // Maps each active output channel i to its canonical channel.
 struct NeuralLayout {
@@ -51,6 +51,8 @@ struct NeuralMaterialInput {
     // Per-material scratch directory under the output directory (only set when the codec's
     // usesWorkDir() is true; created by the caller). Codecs must not use the system temp directory.
     std::string workDir;
+    // width * height, nonzero = texel covered by the mesh UVs (dilated). Empty: sample everywhere.
+    std::vector<uint8_t> uvMask;
 };
 
 struct NeuralMaterialOutput {
@@ -63,6 +65,10 @@ struct NeuralMaterialOutput {
     // The codec has no glTF representation: no extension and no placeholders are written, the
     // material's slots are replaced by plain PNG textures built from `decoded`.
     bool bakeOnly = false;
+    // Optional names of the latent images (suffix of the glTF image/texture names), same order as latentImages.
+    std::vector<std::string> latentNames;
+    // Latent textures are sampled with NEAREST and no mipmaps (the shader interpolates manually).
+    bool latentPointSampling = false;
     // Codec specific numbers for the metrics sidecar (e.g. the tool's own PSNR).
     tinygltf::Value::Object extraMetrics;
 };
