@@ -76,7 +76,16 @@ add_executable(gltf-texture-compressor
     src/third_party_impl.cpp
     src/neural/codec_factory.cpp
     src/neural/preset.cpp
+    src/neural/ntc_v4_ref.cpp
+    src/neural/ntc_v4_io.cpp
     src/uv_mask.cpp)
+
+# The reference decoder is normative: no fused multiply-add contraction.
+if(MSVC)
+    set_source_files_properties(src/neural/ntc_v4_ref.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise")
+else()
+    set_source_files_properties(src/neural/ntc_v4_ref.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 
 if(GTC_WITH_NVIDIA_NTC)
     target_sources(gltf-texture-compressor PRIVATE src/neural/nvidia_ntc.cpp src/neural/ntc_container.cpp)

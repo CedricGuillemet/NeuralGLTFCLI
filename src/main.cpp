@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "gltf_io.h"
+#include "neural/ntc_v4.h"
 #include "passes.h"
 
 namespace fs = std::filesystem;
@@ -117,6 +118,13 @@ int main(int argc, char** argv) {
         };
         if (a == "-h" || a == "--help") { printUsage(); return 0; }
         else if (a == "--version") { std::printf("%s\n", GTC_VERSION); return 0; }
+        else if (a == "--neural-golden") {
+            // Hidden: writes the synthetic babylon-ntc-v4 golden vectors into the given directory.
+            const std::string dir = next("a directory");
+            std::string err;
+            if (!gtc::v4::writeSyntheticGoldens(dir, err)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
+            return 0;
+        }
         if (a == "--steps" || a == "--batch" || a == "--neural-specgloss" ||
             (a.rfind("--neural-", 0) == 0 && a != "--neural-codec" && a != "--neural-suffix" && a != "--neural-bake" &&
              a != "--neural-materials" && a != "--neural-fallback" && a != "--neural-fallback-size"))

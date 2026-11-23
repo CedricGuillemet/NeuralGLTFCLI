@@ -1,0 +1,32 @@
+{
+  "case": "synth_m_rect",
+  "resolution": [64, 32],
+  "mipCount": 7,
+  "levels": 2,
+  "seed": 1234,
+  "outputsCount": 1,
+  "networkOutputs": 1,
+  "grids": [{"resolution": [32, 16], "channels": 12, "bits": 2, "sampling": "concat2x2"}, {"resolution": [16, 8], "channels": 10, "bits": 4, "sampling": "bilinear"}],
+  "layers": [{"in": 71, "inStride": 72, "out": 64}, {"in": 64, "inStride": 64, "out": 64}, {"in": 64, "inStride": 64, "out": 1}],
+  "channels": [{"net": 0, "activation": "sigmoid"}],
+  "outputs": {"occlusion": [0, 1]},
+  "fileLayout": {"ref_m<m>.f32": "float32 LE [j][i][n], decode(m,i,j) before normal-Z / colour conversion", "latents_g<k>_lv<j>.u8": "unpacked q, [y][x][c]", "weights_l<k>.f32": "float32 of the fp16 weights, [out][in] (no stride padding) followed by the bias"},
+  "sha256": {
+    "case.glb": "e5e3916648fdf4480b8c25d6299725e16b72dffade667c2414303f35325ce2b2",
+    "ref_m0.f32": "0e27ac6590b2187d3e02714f4b626bc1a3bd93028c56b31f992effaa8b12486a",
+    "ref_m1.f32": "c887ccdf314b0e871b2877f3307e5e7fc59f0f8eb14ef107142d58d9d42aa0cb",
+    "ref_m2.f32": "0abbacd3aa624857c519a45bebb99de509a74ba6789a0e432c89f8959539a023",
+    "ref_m3.f32": "53daf03ced1432b5bdd22aab4984f83b8ee84de892e24c96d2ead7358f342037",
+    "ref_m4.f32": "f1428564cb7e03dbf239413676a44c3ec3c38d9c4df89418186ca5c628a1cc45",
+    "ref_m5.f32": "69cc5a903af39201b17bfeadbec31c0178185e5d8c66e97940a831955ea1b12f",
+    "ref_m6.f32": "0012f863fcd562f704af2afedc38da30e76603e59f7b785c1a7f82eeffe19723",
+    "ref_occlusion_m0.png": "dc5ac4cdce8aaa6a8d51157c687062a59e915a29012341d01ffe832b846b1fd5",
+    "latents_g0_lv0.u8": "2481ffefb4326c441a75412627e72f6df48567d573e0dded91d121a84921ad2c",
+    "latents_g0_lv1.u8": "63f1d08bd4783f3a79ae424dae6ef5c411d95aa7e4ec49fd9985dbff272aa6c9",
+    "latents_g1_lv0.u8": "b7e94993ba7fd63e95c743a714924ad1a969e3d5bdf696901dcab8ff2ec500e6",
+    "latents_g1_lv1.u8": "e05da8574eac6ae12e42cc60d1d76d0ae49ec80171d0b841f964dbd9e9ff0d0a",
+    "weights_l0.f32": "30ab9bc051b27c72bb545632951c28105bc062ac8694af9cc760958debbd8ea5",
+    "weights_l1.f32": "1929b8e031067e1eb490a11082faf93628c4f2dd5b54175099b5818bf1503cf0",
+    "weights_l2.f32": "837262cc34433732cca38981bdc1b7848423627018b442862603f8ce30531107"
+  }
+}

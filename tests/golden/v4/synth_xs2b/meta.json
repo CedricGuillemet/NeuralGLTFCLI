@@ -1,0 +1,32 @@
+{
+  "case": "synth_xs2b",
+  "resolution": [64, 64],
+  "mipCount": 7,
+  "levels": 2,
+  "seed": 1234,
+  "outputsCount": 4,
+  "networkOutputs": 4,
+  "grids": [{"resolution": [16, 16], "channels": 8, "bits": 2, "sampling": "concat2x2"}, {"resolution": [8, 8], "channels": 12, "bits": 4, "sampling": "bilinear"}],
+  "layers": [{"in": 57, "inStride": 60, "out": 64}, {"in": 64, "inStride": 64, "out": 64}, {"in": 64, "inStride": 64, "out": 4}],
+  "channels": [{"net": 0, "activation": "none"}, {"net": 1, "activation": "none"}, {"net": 2, "activation": "none"}, {"net": 3, "activation": "none"}],
+  "outputs": {"baseColor": [0, 4]},
+  "fileLayout": {"ref_m<m>.f32": "float32 LE [j][i][n], decode(m,i,j) before normal-Z / colour conversion", "latents_g<k>_lv<j>.u8": "unpacked q, [y][x][c]", "weights_l<k>.f32": "float32 of the fp16 weights, [out][in] (no stride padding) followed by the bias"},
+  "sha256": {
+    "case.glb": "bb97e355aba8d7e8385c6b4f32c1dc670cc4e4b3a1e85954311b6ef1ea643b34",
+    "ref_m0.f32": "0a29e3496db61e6285cdd5d141e5b6248a4c117d9f93682f126c82a6263d0207",
+    "ref_m1.f32": "1f63d8dec4bcc99605d71552d17beadd94b9066d1aedca9d722748b06da6b536",
+    "ref_m2.f32": "ed75f4c5073d630627fe88828e438a6ce80dc16fb85c09ac70d6e4fd1b5345ee",
+    "ref_m3.f32": "6afb002022d92e225d3b39b5d265453c62319319ea3e93afcfd905b7416ede25",
+    "ref_m4.f32": "c2ced51a3410fca368eb819cf8cfb60c10d9f598dc1c42cc05ac5af55a01fd19",
+    "ref_m5.f32": "55e90223c4c7e8dcc8fb46b7d781b373607263a4b4ff55d756f06142d660b158",
+    "ref_m6.f32": "59d8a0e743791957f98251d951cab81368ffe7ee51f561cbb06a58c65ae55cd5",
+    "ref_baseColor_m0.png": "f76e3c6c60ed8d7ddba4b818415b7dd29ee445e70bcab12e08a8c14698cbc470",
+    "latents_g0_lv0.u8": "d74223068a22b0ddb17e63cf4814cd9bd5c343d53565769fc153739fa08735a7",
+    "latents_g0_lv1.u8": "4fcaddd9216090d3804e4e2c1d2d2c5ff043023487b987760170fbf3e9c9964d",
+    "latents_g1_lv0.u8": "ada46438d700b5e565f9a9e5db49849a93ece06c0e394db6192944d2b72522eb",
+    "latents_g1_lv1.u8": "79e32afbd3f7e4ca269df2a444c5c3c9e075df3e58ddb40f84c981c732d1a816",
+    "weights_l0.f32": "a0fbd44897825c2d524e5504eed125645b768a42ba1e81d6c9d3b1564c28c99a",
+    "weights_l1.f32": "06b7967d322af10ebeef2fa78acf9993091a55920217f98e35eddf2c98c20723",
+    "weights_l2.f32": "ceb2a3763903b0fed79a15a26504341ad3d6c7908263333f717b37be5e1964f2"
+  }
+}
