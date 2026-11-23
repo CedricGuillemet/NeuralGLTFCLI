@@ -261,7 +261,7 @@ bool saveGlb(Document doc, const std::string& path, std::string& err) {
             }
             src = buf.data() + bv.byteOffset;
         }
-        align(8);
+        align(16);
         bv.buffer = 0;
         bv.byteOffset = bin.size();
         bin.insert(bin.end(), src, src + bv.byteLength);
@@ -269,7 +269,7 @@ bool saveGlb(Document doc, const std::string& path, std::string& err) {
         views.push_back(std::move(bv));
     }
     for (size_t i = 0; i < m.images.size(); ++i) {
-        align(8);
+        align(16);
         tinygltf::BufferView bv;
         bv.buffer = 0;
         bv.byteOffset = bin.size();

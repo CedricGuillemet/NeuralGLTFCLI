@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -25,13 +26,17 @@ struct KtxOptions {
 };
 
 struct NeuralOptions {
-    std::string codec = "babylon-ntc-v2";
+    std::string codec = "nvidia-ntc";  // nvidia-ntc (ntc-cli), babylon-ntc-v1, babylon-ntc-v2, babylon-ntc-v3
     std::string specGloss = "encode"; // encode: also encode KHR_materials_pbrSpecularGlossiness textures (v2), ignore: leave them
     int steps = 6000;
     int batch = 1 << 17;
     uint32_t seed = 1;
     int cudaDevice = 0;
     int fallbackSize = 0; // 0: 1x1 flat placeholders, otherwise downscaled originals
+    // What the replaced slots contain for loaders without the extension: png (placeholders, or downscaled PNGs with
+    // fallbackSize), ktx (KTX2 via KHR_texture_basisu, full size unless fallbackSize is set) or none (no texture).
+    std::string fallback = "png";
+    KtxOptions ktxFallback;
     bool stepsSet = false, batchSet = false; // --steps / --batch given explicitly (override the preset)
 
     // Training levers (src/neural/preset.cpp). Empty / negative values come from the preset.
@@ -59,14 +64,15 @@ struct NeuralOptions {
     std::string workDir;                  // per-material scratch directories are created under this
     std::string commandLine;              // recorded in the metrics
 
-    // "nvidia-ntc" codec (bake-only comparison, runs the external RTXNTC ntc-cli).
-    std::string ntcCli;                   // path to ntc-cli (or the NTC_CLI environment variable)
-    double ntcBpp = 0;                    // target bits per pixel for every material (0: unset)
+    // "nvidia-ntc" codec (the default, runs the external RTXNTC ntc-cli).
+    std::string ntcCli;                   // path to ntc-cli (or the NTC_CLI environment variable, or PATH)
+    double ntcBpp = 4.5;                  // target bits per pixel for every material (snapped to a latent shape)
     std::string ntcMatch;                 // metrics JSON whose per-material sizes set the target bpp
-    std::string ntcSuffix = "nvidia-ntc"; // output name <name>_<suffix>.glb
     std::string ntcArgs;                  // extra arguments passed to ntc-cli
     std::string ntcSnap = "nearest";      // nearest: pick the latent shape closest to the target bpp, ntc: ntc-cli -b
     bool ntcKeepImages = false;           // keep the input/decoded PNGs in the work directory
+    bool ntcMips = false;                 // ntc-cli -g: latent and color mips
+    bool trainingFlagsGiven = false;      // a babylon-ntc training flag was given (ignored by nvidia-ntc)
 };
 
 inline double secondsSince(std::chrono::steady_clock::time_point t0) {
@@ -91,6 +97,8 @@ std::string sanitizeFileName(const std::string& s);
 
 struct Document;
 bool runKtxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir, std::string& err);
+// Encodes only the given images (used for the neural fallback textures); KHR_texture_basisu is then optional.
+bool runKtxPassOnImages(Document& doc, const KtxOptions& opts, const std::set<int>& images, std::string& err);
 bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& pngDir, std::string& err);
 
 } // namespace gtc

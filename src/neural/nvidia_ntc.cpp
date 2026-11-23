@@ -1,7 +1,7 @@
-// "nvidia-ntc": bake-only comparison codec. It does not train anything itself: each material is written
-// as PNG images plus a manifest, NVIDIA's ntc-cli (RTXNTC SDK, not part of this repository) compresses
-// it to a .ntc file and decompresses it again, and the decoded PNGs are read back. Nothing from the SDK
-// is linked or redistributed.
+// "nvidia-ntc": default neural codec. It does not train anything itself: each material is written as PNG
+// images plus a manifest, NVIDIA's ntc-cli (RTXNTC SDK, not part of this repository) compresses it to a
+// .ntc file and decompresses it again, and the decoded PNGs are read back. The .ntc container is validated
+// and returned unchanged as the extension's bitstream. Nothing from the SDK is linked or redistributed.
 
 #include <algorithm>
 #include <cctype>
@@ -23,6 +23,7 @@
 #include "../passes.h"
 #include "codec.h"
 #include "json.hpp"
+#include "neural/ntc_container.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 
@@ -42,9 +43,9 @@ constexpr int kNtcMaxChannels = 16;
 const char* const kSemantic[kMaxNeuralChannels] = {"Albedo", "Albedo", "Albedo", "Transmission", "Normal", "Normal", "Occlusion",
                                                    "Roughness", "Metalness", "Emissive", "Emissive", "Emissive", "Albedo", "Albedo",
                                                    "Albedo", "Transmission", "SpecularColor", "SpecularColor", "SpecularColor", "Glossiness"};
-// Channels that never share an image: one image per run of active channels inside a group.
-const int kGroupOf[kMaxNeuralChannels] = {0, 0, 0, 0, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 6};
-const char* const kGroupName[] = {"baseColor", "normal", "orm", "emissive", "diffuse", "specular", "glossiness"};
+// Channels that never share a texture: one NTC texture per output group (names match the extension's outputs).
+const int kGroupOf[kMaxNeuralChannels] = {0, 0, 0, 0, 1, 1, 2, 3, 4, 5, 5, 5, 6, 6, 6, 6, 7, 7, 7, 8};
+const char* const kGroupName[] = {"baseColor", "normal", "occlusion", "roughness", "metallic", "emissive", "diffuse", "specular", "glossiness"};
 
 struct TextureGroup {
     std::string name;
@@ -102,6 +103,30 @@ bool hasArg(const std::vector<std::string>& args, std::initializer_list<const ch
         for (const char* n : names)
             if (a == n || a.rfind(std::string(n) + "=", 0) == 0) return true;
     return false;
+}
+
+// Looks for an executable in PATH.
+std::string findOnPath(const std::string& name) {
+    const char* path = std::getenv("PATH");
+    if (!path) return {};
+#ifdef _WIN32
+    const char sep = ';';
+    const std::vector<std::string> names = {name + ".exe", name};
+#else
+    const char sep = ':';
+    const std::vector<std::string> names = {name};
+#endif
+    std::stringstream ss(path);
+    std::string dir;
+    while (std::getline(ss, dir, sep)) {
+        if (dir.empty()) continue;
+        for (const std::string& n : names) {
+            std::error_code ec;
+            const fs::path p = toPath(dir) / n;
+            if (fs::is_regular_file(p, ec)) return fromPath(p);
+        }
+    }
+    return {};
 }
 
 #ifdef _WIN32
@@ -213,9 +238,10 @@ public:
             const char* env = std::getenv("NTC_CLI");
             if (env) cli_ = env;
         }
+        if (cli_.empty()) cli_ = findOnPath("ntc-cli");
         if (cli_.empty()) {
-            err = "nvidia-ntc: ntc-cli not specified (use --ntc-cli <path to ntc-cli> or set the NTC_CLI environment variable; get it from "
-                  "https://github.com/NVIDIA-RTX/RTXNTC/releases)";
+            err = "nvidia-ntc: ntc-cli not found. Use --ntc-cli <path>, set the NTC_CLI environment variable, or put ntc-cli on PATH "
+                  "(download the RTXNTC SDK from https://github.com/NVIDIA-RTX/RTXNTC/releases)";
             return false;
         }
         if (!fs::exists(toPath(cli_))) {
@@ -230,6 +256,18 @@ public:
             return false;
         }
         version_ = text;
+        std::smatch vm;
+        static const std::regex reVersion(R"(LibNTC version: (\d+)\.(\d+)\.(\d+))");
+        if (!std::regex_search(text, vm, reVersion)) {
+            err = "nvidia-ntc: cannot read the LibNTC version from '" + cli_ + " --version': " + text;
+            return false;
+        }
+        libVersion_ = vm[1].str() + "." + vm[2].str() + "." + vm[3].str();
+        if (vm[1].str() != "0" || vm[2].str() != "10") {
+            err = "nvidia-ntc: ntc-cli reports LibNTC " + libVersion_ + " but this codec id (nvidia-ntc-0.10) is defined for the 0.10.x SDK "
+                  "(download it from https://github.com/NVIDIA-RTX/RTXNTC/releases)";
+            return false;
+        }
         if (opts_.ntcBpp <= 0 && opts_.ntcMatch.empty() && !hasArg(splitArgs(opts_.ntcArgs), {"-b", "--bitsPerPixel", "-p", "--targetPsnr", "--gridSizeScale"})) {
             err = "nvidia-ntc: no bit rate given (use --ntc-bpp <x>, --ntc-match <metrics.json> or --ntc-args \"--targetPsnr <dB>\")";
             return false;
@@ -260,6 +298,8 @@ public:
     }
 
     std::string name() const override { return "nvidia-ntc"; }
+    std::string codecId() const override { return "nvidia-ntc-0.10"; }
+    int maxOutputChannels() const override { return kNtcMaxChannels; }
     std::string deviceDescription() const override { return "external ntc-cli (" + version_ + ") on CUDA device " + std::to_string(opts_.cudaDevice); }
     bool usesWorkDir() const override { return true; }
     size_t expectedWeightCount(int) const override { return 0; }
@@ -271,6 +311,7 @@ public:
         p["bpp"] = Value(opts_.ntcBpp);
         p["match"] = Value(opts_.ntcMatch);
         p["snap"] = Value(opts_.ntcSnap);
+        p["mips"] = Value(opts_.ntcMips);
         p["extraArgs"] = Value(opts_.ntcArgs);
         p["seed"] = Value(int(opts_.seed));
         p["isSRGB"] = Value(false);
@@ -359,11 +400,9 @@ public:
         }
         const bool userRate = hasArg(extra, {"-b", "--bitsPerPixel", "-p", "--targetPsnr", "--gridSizeScale", "--matchBcPsnr"});
         std::vector<std::string> args = {"--loadManifest", fromPath(work / "manifest.json"), "-c", "-D", "-o", fromPath(work / "material.ntc"), "-i",
-                                         fromPath(decodedDir), "-F", "png", "-B", "none", "--cudaDevice", std::to_string(opts_.cudaDevice)};
-        if (opts_.seed) {
-            args.push_back("--randomSeed");
-            args.push_back(std::to_string(opts_.seed));
-        }
+                                         fromPath(decodedDir), "-F", "png", "-B", "none", "--gdeflate", "none", "--cudaDevice", std::to_string(opts_.cudaDevice),
+                                         "--randomSeed", std::to_string(opts_.seed ? opts_.seed : 1)};
+        if (opts_.ntcMips) args.push_back("-g");
         Shape shape{0, 0, 0};
         char num[32];
         if (!userRate) {
@@ -467,24 +506,64 @@ public:
                 return false;
             }
         }
+        std::ifstream nf(work / "material.ntc", std::ios::binary);
+        out.bitstream.assign(std::istreambuf_iterator<char>(nf), std::istreambuf_iterator<char>());
+        NtcContainerInfo info;
+        if (!parseNtcContainer(out.bitstream, info, err)) {
+            err = "invalid ntc-cli output " + fromPath(work / "material.ntc") + ": " + err;
+            return false;
+        }
+        // ntc-cli pads numChannels up to an even count
+        if (info.width != w || info.height != h || info.numChannels < N || info.numChannels > N + 1 || info.textures.size() != groups.size()) {
+            err = "ntc-cli output does not match the material (" + std::to_string(info.width) + "x" + std::to_string(info.height) + ", " +
+                  std::to_string(info.numChannels) + " channels, " + std::to_string(info.textures.size()) + " textures)";
+            return false;
+        }
+        // The texture ranges are what the extension's outputs refer to.
+        for (const TextureGroup& grp : groups) {
+            const auto t = std::find_if(info.textures.begin(), info.textures.end(), [&](const NtcTextureInfo& x) { return x.name == grp.name; });
+            if (t == info.textures.end() || t->firstChannel != grp.outputs.front() || t->numChannels != int(grp.outputs.size())) {
+                err = "ntc-cli output: texture '" + grp.name + "' does not cover the expected channels";
+                return false;
+            }
+        }
+
+        {
+            int dcode = 0;
+            std::string derr;
+            std::ofstream df(work / "describe.txt", std::ios::binary);
+            if (runProcess(cli_, {fromPath(work / "material.ntc"), "-d"}, in.workDir, [&](const std::string& l) { df << l << "\n"; }, dcode, derr) && dcode != 0)
+                std::printf("    warning: ntc-cli -d exited with code %d\n", dcode);
+        }
         if (!opts_.ntcKeepImages) {
             fs::remove_all(imageDir, ec);
             fs::remove_all(decodedDir, ec);
         }
 
-        out.bakeOnly = true;
         out.compressedBytes = ntcBytes;
+        Value::Object ntc;
+        ntc["containerVersion"] = Value(int(info.containerVersion));
+        ntc["schemaVersion"] = Value(info.schemaVersion);
+        ntc["numChannels"] = Value(info.numChannels);
+        ntc["gridSizeScale"] = Value(info.gridSizeScale);
+        ntc["numFeatures"] = Value(info.numFeatures);
+        ntc["numColorMips"] = Value(info.numColorMips);
+        ntc["encoder"] = Value("ntc-cli (LibNTC " + libVersion_ + ")");
+        out.ntcInfo = std::move(ntc);
         Value::Object& x = out.extraMetrics;
         x["ntcFile"] = Value(fromPath(work / "material.ntc"));
         x["ntcBytes"] = Value(double(ntcBytes));
+        x["ntcJsonBytes"] = Value(double(info.jsonBytes));
         x["ntcBpp"] = Value(8.0 * double(ntcBytes) / double(texels));
         x["targetBpp"] = Value(bpp);
-        x["gridSizeScale"] = Value(parsed.gridSizeScale);
-        x["numFeatures"] = Value(parsed.numFeatures);
+        x["gridSizeScale"] = Value(info.gridSizeScale);
+        x["numFeatures"] = Value(info.numFeatures);
+        x["numColorMips"] = Value(info.numColorMips);
         x["ntcPsnrInt8"] = Value(parsed.psnrInt8);
         x["ntcPsnrFp8"] = Value(parsed.psnrFp8);
         x["trainingSteps"] = Value(parsed.steps);
         x["cliSeconds"] = Value(cliSeconds);
+        x["encoder"] = Value("ntc-cli (LibNTC " + libVersion_ + ")");
         x["command"] = Value(cmdline);
         Value::Object per;
         for (const auto& [name, db] : parsed.perTexture) per[name.substr(0, name.find('|'))] = Value(db);
@@ -494,7 +573,7 @@ public:
 
 private:
     NeuralOptions opts_;
-    std::string cli_, version_;
+    std::string cli_, version_, libVersion_;
     std::map<std::string, double> matchBpp_;
 };
 

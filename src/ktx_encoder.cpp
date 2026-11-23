@@ -130,7 +130,9 @@ std::string sanitizeFileName(const std::string& s) {
     return r.empty() ? "unnamed" : r;
 }
 
-bool runKtxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir, std::string& err) {
+namespace {
+
+bool ktxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir, const std::set<int>* only, bool required, std::string& err) {
     auto& m = doc.model;
 
     // Classify every image by how materials use it.
@@ -157,6 +159,7 @@ bool runKtxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir
 
     size_t done = 0;
     for (auto& [imgIdx, u] : usage) {
+        if (only && !only->count(imgIdx)) continue;
         ++done;
         auto& gimg = m.images[imgIdx];
         std::string label = gimg.name.empty() ? "image" + std::to_string(imgIdx) : gimg.name;
@@ -204,8 +207,18 @@ bool runKtxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir
             tex.source = -1;
         }
     }
-    doc.addExtensionUsed("KHR_texture_basisu", true);
+    doc.addExtensionUsed("KHR_texture_basisu", required);
     return true;
+}
+
+} // namespace
+
+bool runKtxPass(Document& doc, const KtxOptions& opts, const std::string& pngDir, std::string& err) {
+    return ktxPass(doc, opts, pngDir, nullptr, true, err);
+}
+
+bool runKtxPassOnImages(Document& doc, const KtxOptions& opts, const std::set<int>& images, std::string& err) {
+    return ktxPass(doc, opts, "", &images, false, err);
 }
 
 } // namespace gtc
