@@ -49,9 +49,9 @@ bool parseNtcContainer(const std::vector<uint8_t>& file, NtcContainerInfo& info,
     }
     const uint64_t jsonOff = readU64(&file[8]), jsonSize = readU64(&file[16]);
     const uint64_t dataOff = readU64(&file[24]), dataSize = readU64(&file[32]);
-    for (uint64_t v : {jsonOff, jsonSize, dataOff, dataSize})
+    for (uint64_t v : {jsonOff, dataOff})
         if (v % 4 != 0) {
-            err = "NTC chunk offset or size is not a multiple of 4";
+            err = "NTC chunk offset is not a multiple of 4";
             return false;
         }
     if (jsonOff < 40 || jsonOff > file.size() || jsonSize > file.size() - jsonOff || dataOff > file.size() ||
