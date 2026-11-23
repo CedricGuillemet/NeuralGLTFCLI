@@ -89,10 +89,10 @@ There is one canonical 20-channel table. A material uses only the channels it ne
 | 8 | `metallic` | 1 | `metallicRoughnessTexture` B | linear |
 | 9-11 | `emissive` | 3 | `emissiveTexture` | sRGB-encoded |
 | 12-15 | `diffuse` | 3, or 4 when `alphaMode` is not `OPAQUE` | `KHR_materials_pbrSpecularGlossiness.diffuseTexture` | sRGB-encoded |
-| 16-18 | `specular` | 3 | `KHR_materials_pbrSpecularGlossiness.specularGlossinessTexture` RGB | linear |
+| 16-18 | `specular` | 3 | `KHR_materials_pbrSpecularGlossiness.specularGlossinessTexture` RGB | sRGB-encoded |
 | 19 | `glossiness` | 1 | `KHR_materials_pbrSpecularGlossiness.specularGlossinessTexture` A | linear |
 
-Glossiness is the alpha channel of the spec-gloss texture, as in `KHR_materials_pbrSpecularGlossiness` (1.0 if the texture has no alpha). As in v1, decoded values are clamped to `[0,1]` and the factors of the material still apply.
+Glossiness is the alpha channel of the spec-gloss texture, as in `KHR_materials_pbrSpecularGlossiness` (1.0 if the texture has no alpha). Specular RGB is sRGB-encoded as in that extension; glossiness is linear. As in v1, decoded values are clamped to `[0,1]` and the factors of the material still apply.
 
 ### Example
 
