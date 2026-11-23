@@ -68,7 +68,7 @@ bool Model::finalize(std::string& err) {
     g[0].concat = true;
     g[1].concat = false;
     M = mipCountOf(W, H);
-    L = levelCountOf(g[1].w, g[1].h);
+    L = std::min(levelCountOf(g[1].w, g[1].h), std::max(1, levelCap));
     nNet = 0;
     for (const ChannelSpec& c : channels)
         if (!c.isConst) {
@@ -296,6 +296,67 @@ void RefDecoder::decodeMip(int m, int threads, std::vector<float>& out) const {
     std::vector<std::thread> pool;
     for (int t = 0; t < threads; ++t) pool.emplace_back(work, t);
     for (auto& th : pool) th.join();
+}
+
+size_t zeroDeadCells(Model& m, const std::vector<uint8_t>& mask0) {
+    std::vector<uint8_t> used[2][16];
+    for (int g = 0; g < 2; ++g)
+        for (int lv = 0; lv < m.L; ++lv) {
+            int w, h;
+            levelSize(m.g[g], lv, w, h);
+            used[g][lv].assign(size_t(w) * h, 0);
+        }
+    std::vector<uint8_t> cur = mask0, nxt;
+    int w = m.W, h = m.H;
+    for (int mip = 0; mip < m.M; ++mip) {
+        const int lv = levelOf(mip, m.L);
+        for (int g = 0; g < 2; ++g) {
+            int gw, gh;
+            levelSize(m.g[g], lv, gw, gh);
+            const float rx = float(gw) / float(w), ry = float(gh) / float(h);
+            for (int j = 0; j < h; ++j)
+                for (int i = 0; i < w; ++i) {
+                    if (!cur[size_t(j) * w + i]) continue;
+                    const int cx = int(std::floor((float(i) + 0.5f) * rx - 0.5f)), cy = int(std::floor((float(j) + 0.5f) * ry - 0.5f));
+                    for (int t = 0; t < 4; ++t) {
+                        const int x = (((cx + (t & 1)) % gw) + gw) % gw, y = (((cy + (t >> 1)) % gh) + gh) % gh;
+                        used[g][lv][size_t(y) * gw + x] = 1;
+                    }
+                }
+        }
+        if (mip + 1 < m.M) {
+            const int w2 = std::max(1, w >> 1), h2 = std::max(1, h >> 1);
+            nxt.assign(size_t(w2) * h2, 0);
+            for (int y = 0; y < h2; ++y)
+                for (int x = 0; x < w2; ++x) {
+                    const int x1 = std::min(2 * x + 1, w - 1), y1 = std::min(2 * y + 1, h - 1);
+                    nxt[size_t(y) * w2 + x] = (cur[size_t(2 * y) * w + 2 * x] | cur[size_t(2 * y) * w + x1] | cur[size_t(y1) * w + 2 * x] | cur[size_t(y1) * w + x1]) ? 1 : 0;
+                }
+            cur.swap(nxt);
+            w = w2, h = h2;
+        }
+    }
+    size_t zeroed = 0;
+    for (int g = 0; g < 2; ++g) {
+        const GridSpec& gs = m.g[g];
+        int aw, ah;
+        atlasSize(gs, m.L, aw, ah);
+        for (int lv = 0; lv < m.L; ++lv) {
+            int lw, lh, ox, oy;
+            levelSize(gs, lv, lw, lh);
+            atlasOrigin(gs, lv, ox, oy);
+            for (int y = 0; y < lh; ++y)
+                for (int x = 0; x < lw; ++x) {
+                    if (used[g][lv][size_t(y) * lw + x]) continue;
+                    uint8_t* cell = &m.q[g][(size_t(oy + y) * aw + ox + x) * gs.c];
+                    for (int c = 0; c < gs.c; ++c) {
+                        if (cell[c] != zeroQ(gs.bits)) ++zeroed;
+                        cell[c] = uint8_t(zeroQ(gs.bits));
+                    }
+                }
+        }
+    }
+    return zeroed;
 }
 
 } // namespace gtc::v4

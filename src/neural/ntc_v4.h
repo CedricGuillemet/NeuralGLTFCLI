@@ -89,7 +89,7 @@ struct Model {
     std::vector<float> b[3];
     std::vector<ChannelSpec> channels;
     int nNet = 0;
-
+    int levelCap = 64; // experiments: cap the pyramid depth (E8); the spec value is the full pyramid
     int inputs() const { return inputCount(g[0], g[1]); }
     // Fills W,H,M,L, layer strides and the net output count from the grids and channels.
     bool finalize(std::string& err);
@@ -124,6 +124,10 @@ private:
 // Case writer shared by the golden generator: quad glb with the extension and fallback textures.
 bool writeV4Glb(const std::string& path, const Model& m, const std::string& name, std::string& err);
 tinygltf::Value::Object v4Parameters(const Model& m);
+
+// Sets to value 0 (q = zeroQ) every latent cell that no texel of `mask0` (dilated UV mask, W*H) reads at any mip.
+// Returns the number of cells zeroed.
+size_t zeroDeadCells(Model& m, const std::vector<uint8_t>& mask0);
 
 // Hidden --neural-golden: writes the synthetic cases of the spec into dir.
 bool writeSyntheticGoldens(const std::string& dir, std::string& err);

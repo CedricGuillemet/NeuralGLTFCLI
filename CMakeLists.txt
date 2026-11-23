@@ -13,6 +13,12 @@ option(GTC_WITH_NVIDIA_NTC "Build the nvidia-ntc neural codec (runs the RTXNTC n
 set(GTC_WITH_CUDA_CODEC AUTO CACHE STRING "Build the legacy babylon-ntc CUDA codecs (AUTO, ON or OFF)")
 set_property(CACHE GTC_WITH_CUDA_CODEC PROPERTY STRINGS AUTO ON OFF)
 
+set_property(CACHE GTC_WITH_CUDA_CODEC PROPERTY STRINGS AUTO ON OFF)
+# Legacy v1/v2/v3 kernel shapes: "v4" (default) compiles only the v2 shape (v4 has its own trainer), "all" every v3 shape.
+set(NTC_SHAPE_SET v4 CACHE STRING "Legacy network kernel shapes to compile (v4 or all)")
+set_property(CACHE NTC_SHAPE_SET PROPERTY STRINGS v4 all)
+option(NTC_ONLY_V2 "Alias of NTC_SHAPE_SET=v4" OFF)
+
 set(GTC_CUDA_ENABLED OFF)
 if(GTC_WITH_CUDA_CODEC STREQUAL "ON")
     set(GTC_CUDA_ENABLED ON)
@@ -93,8 +99,11 @@ if(GTC_WITH_NVIDIA_NTC)
 endif()
 
 if(GTC_CUDA_ENABLED)
+    find_package(CUDAToolkit REQUIRED)
     target_sources(gltf-texture-compressor PRIVATE
         src/neural/babylon_ntc.cpp
+        src/neural/babylon_ntc_v4.cpp
+        src/neural/ntc_v4_cuda.cu
         src/neural/ntc_cuda.cu
         src/neural/ntc_shape_0.cu
         src/neural/ntc_shape_1.cu
@@ -105,6 +114,11 @@ if(GTC_CUDA_ENABLED)
         src/neural/ntc_shape_6.cu
         src/neural/ntc_shape_7.cu)
     target_compile_definitions(gltf-texture-compressor PRIVATE GTC_WITH_CUDA_CODEC=1)
+    target_link_libraries(gltf-texture-compressor PRIVATE CUDA::cublas)
+    # The v4 trainer is shape independent; only the legacy v2 kernel (24, 32, 2) is needed by default.
+    if(NTC_SHAPE_SET STREQUAL "v4" OR NTC_ONLY_V2)
+        target_compile_definitions(gltf-texture-compressor PRIVATE NTC_ONLY_V2=1)
+    endif()
 endif()
 target_include_directories(gltf-texture-compressor PRIVATE src ${tinygltf_SOURCE_DIR})
 target_link_libraries(gltf-texture-compressor PRIVATE ktx)

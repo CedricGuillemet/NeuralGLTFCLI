@@ -19,7 +19,7 @@ constexpr int kOutputs = 20;
 constexpr int kPosEncInputs = 8; // sin/cos at 2 frequencies, both axes
 constexpr int kMaxGrids = 3;
 
-enum Activation { kRelu = 0, kSilu = 1, kHgelu = 2 };
+enum Activation { kRelu = 0, kSilu = 1, kHardSwish = 2 /* v3 "hgelu": see docs, not the paper hardGELU */ };
 enum LossKind { kLossL2 = 0, kLossCharbonnier = 1 };
 
 struct GridDesc {

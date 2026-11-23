@@ -31,11 +31,23 @@ void printUsage() {
         "      --uastc-rdo <x>        UASTC rate-distortion quality scalar, 0 disables (default 1.0)\n"
         "      --zstd <n>             Zstandard level for UASTC textures, 0 disables (default 18)\n"
         "      --uastc-color          use UASTC for color textures too (higher quality, larger)\n\n"
-        "Neural options (the default nvidia-ntc codec needs an NVIDIA GPU and NVIDIA's ntc-cli):\n"
-        "      --neural-codec <name>  nvidia-ntc (default; NVIDIA NTC .ntc container embedded in the glb, codec id\n"
-        "                             nvidia-ntc-0.10), or the legacy CUDA codecs babylon-ntc-v2 (variable outputs: also\n"
-        "                             emissive and spec-gloss textures), babylon-ntc-v1 (core metal-rough textures only)\n"
-        "                             and babylon-ntc-v3; the legacy codecs need a build with GTC_WITH_CUDA_CODEC=ON\n"
+        "Neural options (the default babylon-ntc-v4 codec needs an NVIDIA GPU and a build with GTC_WITH_CUDA_CODEC=ON):\n"
+        "      --neural-codec <name>  babylon-ntc-v4 (default; clean-room latent pyramid + 64-wide MLP, preset v4s), nvidia-ntc\n"
+        "                             (opt-in; NVIDIA NTC .ntc container embedded in the glb, codec id nvidia-ntc-0.10, needs\n"
+        "                             NVIDIA's ntc-cli), or the legacy CUDA codecs babylon-ntc-v2 (variable outputs), babylon-ntc-v1\n"
+        "                             (core metal-rough textures only) and babylon-ntc-v3 (these need NTC_SHAPE_SET=all)\n"
+        "      --neural-preset <p>    babylon-ntc-v4: v4xs, v4s (default), v4m, v4l; legacy codecs: v2best (default), v2, v3s,\n"
+        "                             v3m, v3l, v3x; the flags below override a preset\n"
+        "      --steps <n>            training steps per material (v4: phase A steps, default 40000, then max(n/20, 2000)\n"
+        "                             MLP fine-tune steps on the frozen quantized latents)\n"
+        "      --batch <n>            samples per step (v4 default 65536)\n"
+        "      --neural-grids <list>  latent grids div:channels:bits,... (finest first); v4: two grids with div1 = 2*div0,\n"
+        "                             e.g. 4:12:4,8:16:4 (bits 2 or 4, channels*bits a multiple of 8)\n"
+        "      --neural-activation <hardgelu|hardswish|silu>   v4 experiments only: anything but hardgelu is not decodable by\n"
+        "                             the format and skips the CPU reference check\n"
+        "      --neural-out-act <none|sigmoid|group=act,...>   v4: output activation per channel group (base, normal, ...)\n"
+        "      --neural-no-const      v4: do not elide constant channels\n"
+        "      --neural-tune <k=v,...> v4 experiments: lrLatent, lrMlp, lrB, init, uniformMip, inside, noise, levelCap, stepsB\n"
         "      --ntc-cli <path>       ntc-cli executable (else the NTC_CLI environment variable, else ntc-cli on PATH;\n"
         "                             download the RTXNTC SDK from https://github.com/NVIDIA-RTX/RTXNTC/releases)\n"
         "      --ntc-bpp <x>          target bits per pixel for every material (default 4.5, snapped to the nearest\n"
@@ -62,16 +74,12 @@ void printUsage() {
         "                             only encode the comma-separated material names (others are left untouched)\n"
         "      --seed <n>             random seed (default 1)\n"
         "      --cuda-device <n>      CUDA device index (default 0)\n\n"
-        "Legacy babylon-ntc training options (ignored, with a warning, by nvidia-ntc):\n"
+        "Legacy babylon-ntc training options (ignored, with a warning, by nvidia-ntc; --steps/--batch/--neural-grids/\n"
+        "--neural-activation also apply to v4 as described above):\n"
         "      --neural-specgloss <encode|ignore>\n"
         "                             v2: encode KHR_materials_pbrSpecularGlossiness textures (default) or leave them\n"
-        "      --steps <n>            training steps per material (default: preset; 24000 for v2best/v3*, 6000 for v2)\n"
-        "      --batch <n>            samples per step (default 131072)\n"
-        "      --neural-preset <p>    v2best (default; v2 file format, tuned training), v2 (legacy training), v3s, v3m, v3l,\n"
-        "                             v3x (babylon-ntc-v3 file format); the flags below override a preset\n"
-        "      --neural-grids <list>  latent grids div:channels:bits,... (finest first), e.g. 4:16:4,16:16:4\n"
         "      --neural-hidden <n>    MLP width; --neural-layers <n>: hidden layers\n"
-        "      --neural-activation <relu|silu|hgelu>\n"
+        "      --neural-activation <relu|silu|hgelu|hardswish>   hardswish: z*clamp(z+3,0,6)/6 (hgelu is the older v3 shape)\n"
         "      --neural-uv-mask <on|off>   train on the texels covered by the mesh UVs\n"
         "      --neural-sampling <continuous|texel|mixed:p>   texel-center sample probability\n"
         "      --neural-importance <x>     0..1 gradient-energy sampling blend\n"
@@ -154,7 +162,10 @@ int main(int argc, char** argv) {
         else if (a == "--neural-grids") nOpts.grids = next("a grid list");
         else if (a == "--neural-hidden") nextInt(nOpts.hidden);
         else if (a == "--neural-layers") nextInt(nOpts.hiddenLayers);
-        else if (a == "--neural-activation") nOpts.activation = next("relu, silu or hgelu");
+        else if (a == "--neural-activation") nOpts.activation = next("hardgelu, hardswish, silu, relu or hgelu");
+        else if (a == "--neural-out-act") nOpts.outAct = next("none, sigmoid or group=act pairs");
+        else if (a == "--neural-tune") nOpts.tune = next("key=value pairs");
+        else if (a == "--neural-no-const") nOpts.noConst = true;
         else if (a == "--neural-uv-mask") nOpts.uvMask = next("on or off");
         else if (a == "--neural-sampling") nOpts.sampling = next("continuous, texel or mixed:<p>");
         else if (a == "--neural-importance") nOpts.importance = float(std::atof(next("a number")));

@@ -26,7 +26,7 @@ struct KtxOptions {
 };
 
 struct NeuralOptions {
-    std::string codec = "nvidia-ntc";  // nvidia-ntc (ntc-cli), babylon-ntc-v1, babylon-ntc-v2, babylon-ntc-v3
+    std::string codec = "babylon-ntc-v4"; // babylon-ntc-v4 (default), nvidia-ntc (opt-in benchmark codec), or the legacy babylon-ntc-v1/v2/v3
     std::string specGloss = "encode"; // encode: also encode KHR_materials_pbrSpecularGlossiness textures (v2), ignore: leave them
     int steps = 6000;
     int batch = 1 << 17;
@@ -40,10 +40,13 @@ struct NeuralOptions {
     bool stepsSet = false, batchSet = false; // --steps / --batch given explicitly (override the preset)
 
     // Training levers (src/neural/preset.cpp). Empty / negative values come from the preset.
-    std::string preset = "v2best";   // v2, v2best, v3s, v3m, v3l, v3x
-    std::string grids;           // "div:channels:bits,..." e.g. "4:16:4,16:16:4"
+    std::string preset;          // empty: v4s for babylon-ntc-v4, v2best otherwise; v4xs v4s v4m v4l, v2, v2best, v3s, v3m, v3l, v3x
+    std::string grids;           // "div:channels:bits,..." e.g. "4:16:4,16:16:4" (v4: "4:12:4,8:16:4")
     int hidden = 0, hiddenLayers = 0;
-    std::string activation;      // relu, silu, hgelu
+    std::string activation;      // relu, silu, hgelu (v3 hard-swish), hardswish; v4: hardgelu (default), hardswish, silu
+    std::string outAct;          // v4: "none", "sigmoid" or "group=act,..." output activation (see --neural-out-act)
+    std::string tune;            // v4 trainer levers "key=value,..." (see --neural-tune)
+    bool noConst = false;        // v4: keep constant channels in the network
     std::string uvMask;          // on, off
     std::string sampling;        // continuous, texel, mixed:<p>
     float importance = -1.0f;

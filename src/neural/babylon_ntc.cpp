@@ -18,7 +18,7 @@ Value intArray(std::initializer_list<int> v) {
     return Value(std::move(a));
 }
 
-const char* activationName(int a) { return a == ntc::kSilu ? "silu" : a == ntc::kHgelu ? "hgelu" : "relu"; }
+const char* activationName(int a) { return a == ntc::kSilu ? "silu" : a == ntc::kHardSwish ? "hgelu" : "relu"; }
 
 class BabylonNtc : public INeuralCodec {
 public:

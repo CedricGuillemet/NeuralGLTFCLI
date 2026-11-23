@@ -631,15 +631,19 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         }
         weightBytes = res.weights.size();
         const bool hasBitstream = !res.bitstream.empty();
-        if (weightBytes != codec->expectedWeightCount(N) * 4) {
+        if (!res.weightsFp16 && weightBytes != codec->expectedWeightCount(N) * 4) {
             err = label + ": unexpected weight count";
             return false;
         }
         Value::Object weights;
         if (!hasBitstream) {
             weights["bufferView"] = Value(doc.addBufferView(std::move(res.weights), label + "_neural_weights"));
-            weights["componentType"] = Value(5126);
-            weights["count"] = Value(int(weightBytes / 4));
+            if (res.weightsFp16) {
+                weights["byteLength"] = Value(int(weightBytes));
+            } else {
+                weights["componentType"] = Value(5126);
+                weights["count"] = Value(int(weightBytes / 4));
+            }
         }
 
         // v1 lists the channel indices of each group, v2 gives [startChannel, componentCount].

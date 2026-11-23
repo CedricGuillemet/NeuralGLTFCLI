@@ -74,6 +74,8 @@ struct NeuralMaterialOutput {
     std::vector<std::string> latentNames;
     // Latent textures are sampled with NEAREST and no mipmaps (the shader interpolates manually).
     bool latentPointSampling = false;
+    // `weights` holds fp16 bytes (babylon-ntc-v4): the extension's weights reference is {bufferView, byteLength}.
+    bool weightsFp16 = false;
     // Codec specific numbers for the metrics sidecar (e.g. the tool's own PSNR).
     tinygltf::Value::Object extraMetrics;
 };
@@ -101,5 +103,7 @@ std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::
 std::unique_ptr<INeuralCodec> createNvidiaNtcCodec(const NeuralOptions& opts, std::string& err);
 // Only built with GTC_WITH_CUDA_CODEC=ON (src/neural/babylon_ntc.cpp).
 std::unique_ptr<INeuralCodec> createBabylonNtcCodec(const NeuralOptions& opts, std::string& err);
+// Only built with GTC_WITH_CUDA_CODEC=ON (src/neural/babylon_ntc_v4.cpp).
+std::unique_ptr<INeuralCodec> createBabylonNtcV4Codec(const NeuralOptions& opts, std::string& err);
 
 } // namespace gtc
