@@ -24,7 +24,8 @@ struct KtxOptions {
 };
 
 struct NeuralOptions {
-    std::string codec = "babylon-ntc-v1";
+    std::string codec = "babylon-ntc-v2";
+    std::string specGloss = "encode"; // encode: also encode KHR_materials_pbrSpecularGlossiness textures (v2), ignore: leave them
     int steps = 6000;
     int batch = 1 << 17;
     uint32_t seed = 1;

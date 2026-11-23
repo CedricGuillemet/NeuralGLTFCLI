@@ -1,8 +1,11 @@
 #pragma once
 
-// CUDA implementation of the "babylon-ntc-v1" neural texture network:
+// CUDA implementation of the "babylon-ntc-v1" / "babylon-ntc-v2" neural texture network:
 // two bilinear latent grids (8 channels each, at 1/4 and 1/16 resolution) plus a
-// sin/cos positional encoding feed a 24 -> 32 -> 32 -> 9 ReLU MLP.
+// sin/cos positional encoding feed a 24 -> 32 -> 32 -> N ReLU MLP. Training always runs with
+// kOutputs (20) output channels; channels with a loss weight of 0 never produce a gradient, so
+// the hidden layers train exactly as with an N-output network and only the first N columns of
+// the last layer are exported.
 
 #include <cstdint>
 #include <functional>
@@ -14,7 +17,7 @@ namespace gtc::ntc {
 constexpr int kLatentChannels = 8;
 constexpr int kInputs = 24;
 constexpr int kHidden = 32;
-constexpr int kOutputs = 9;
+constexpr int kOutputs = 20;
 constexpr int kHiDiv = 4;
 constexpr int kLoDiv = 16;
 // Weight layout: W0[in][hidden], b0, W1[hidden][hidden], b1, W2[hidden][out], b2.
@@ -42,17 +45,18 @@ struct Model {
     int hiW = 0, hiH = 0, loW = 0, loH = 0;
     std::vector<uint8_t> hi; // hiH * hiW * 8, quantized latents
     std::vector<uint8_t> lo; // loH * loW * 8
-    std::vector<float> weights; // kParams
+    std::vector<float> weights; // kParams, last layer with kOutputs columns
 };
 
 // phase: 0 = training, 1 = fine-tuning after latent quantization.
 using Progress = std::function<void(int phase, int step, int total, float loss)>;
 
-// target: height * width * 9 floats in [0,1] (row 0 = top of the image).
-bool train(const std::vector<float>& target, int width, int height, const float lossWeights[kOutputs],
+// target: height * width * kOutputs floats in [0,1] (row 0 = top of the image). Only the first
+// `outputs` channels are initialized and normalized as active; the others must have a loss weight of 0.
+bool train(const std::vector<float>& target, int width, int height, int outputs, const float lossWeights[kOutputs],
            const TrainConfig& cfg, Model& out, const Progress& progress, std::string& err);
 
-// Decodes every texel center; out: height * width * 9 floats.
+// Decodes every texel center; out: height * width * kOutputs floats.
 bool decode(const Model& model, int device, std::vector<float>& out, std::string& err);
 
 std::string deviceName(int device);

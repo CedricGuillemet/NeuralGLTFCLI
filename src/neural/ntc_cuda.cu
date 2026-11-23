@@ -15,6 +15,8 @@ constexpr int kThreads = 64;          // samples per block iteration
 constexpr int kStride = kThreads + 1; // shared memory row stride (avoids bank conflicts)
 constexpr int kRows = 64;             // max rows staged per gradient phase
 constexpr int kAcc = (kParams + kThreads - 1) / kThreads;
+static_assert(kHidden + kOutputs <= kRows, "last-layer staging must fit in shared memory");
+static_assert(kInputs + kHidden <= kRows && 2 * kHidden <= kRows, "layer staging must fit in shared memory");
 
 __constant__ float cW[kParams];
 __constant__ float cLossW[kOutputs];
@@ -214,7 +216,7 @@ __global__ void __launch_bounds__(kThreads) trainKernel(const float* hiN, const 
         for (int j = 0; j < kHidden; ++j) buf[(kHidden + j) * kStride + t] = d2[j];
         __syncthreads();
         accumulate<1>(acc, buf, t);
-        // Layer 2: a2 (rows 0..31) x dO (rows 32..40).
+        // Layer 2: a2 (rows 0..31) x dO (rows 32..51).
         __syncthreads();
 #pragma unroll
         for (int i = 0; i < kHidden; ++i) buf[i * kStride + t] = a2[i];
@@ -314,7 +316,7 @@ std::string deviceName(int device) {
     return prop.name;
 }
 
-bool train(const std::vector<float>& target, int width, int height, const float lossWeights[kOutputs],
+bool train(const std::vector<float>& target, int width, int height, int outputs, const float lossWeights[kOutputs],
            const TrainConfig& cfg, Model& out, const Progress& progress, std::string& err) {
     CK(cudaSetDevice(cfg.device));
     cudaDeviceProp prop{};
@@ -341,7 +343,14 @@ bool train(const std::vector<float>& target, int width, int height, const float 
     };
     initLayer(kOffW0, kOffB0, kInputs, kHidden);
     initLayer(kOffW1, kOffB1, kHidden, kHidden);
-    initLayer(kOffW2, kOffB2, kHidden, kOutputs);
+    // The last layer is initialized as an N-output layer (the active columns come first), so that a
+    // network with N active outputs trains like a dedicated N-output network.
+    {
+        std::uniform_real_distribution<float> d(-1.0f / std::sqrt(float(kHidden)), 1.0f / std::sqrt(float(kHidden)));
+        for (int k = 0; k < kHidden; ++k)
+            for (int c = 0; c < outputs; ++c) hP[kOffW2 + k * kOutputs + c] = d(gen);
+        for (int c = 0; c < outputs; ++c) hP[kOffB2 + c] = d(gen);
+    }
 
     DeviceArena arena;
     cudaError_t rc = cudaSuccess;
@@ -357,7 +366,7 @@ bool train(const std::vector<float>& target, int width, int height, const float 
     CK(cudaMemcpyToSymbol(cLossW, lossWeights, kOutputs * sizeof(float)));
 
     const int trainBlocks = std::min(blocksFor(cfg.batch, kThreads), prop.multiProcessorCount * 16);
-    const float invNorm = 1.0f / (float(cfg.batch) * kOutputs);
+    const float invNorm = 1.0f / (float(cfg.batch) * outputs);
     constexpr int T = 256;
 
     auto runPhase = [&](int phase, int steps) -> bool {

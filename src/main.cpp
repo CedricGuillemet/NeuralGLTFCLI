@@ -31,7 +31,10 @@ void printUsage() {
         "      --zstd <n>             Zstandard level for UASTC textures, 0 disables (default 18)\n"
         "      --uastc-color          use UASTC for color textures too (higher quality, larger)\n\n"
         "Neural options (requires an NVIDIA GPU):\n"
-        "      --neural-codec <name>  codec (default babylon-ntc-v1)\n"
+        "      --neural-codec <name>  codec: babylon-ntc-v2 (default, variable outputs: also emissive and\n"
+        "                             spec-gloss textures) or babylon-ntc-v1 (core metal-rough textures only)\n"
+        "      --neural-specgloss <encode|ignore>\n"
+        "                             v2: encode KHR_materials_pbrSpecularGlossiness textures (default) or leave them\n"
         "      --steps <n>            training steps per material (default 6000)\n"
         "      --batch <n>            samples per step (default 131072)\n"
         "      --seed <n>             random seed (default 1)\n"
@@ -89,6 +92,13 @@ int main(int argc, char** argv) {
         else if (a == "--zstd") nextInt(ktxOpts.zstdLevel);
         else if (a == "--uastc-color") ktxOpts.uastcForColor = true;
         else if (a == "--neural-codec") nOpts.codec = next("a codec name");
+        else if (a == "--neural-specgloss") {
+            nOpts.specGloss = next("encode or ignore");
+            if (nOpts.specGloss != "encode" && nOpts.specGloss != "ignore") {
+                std::fprintf(stderr, "error: --neural-specgloss expects encode or ignore\n");
+                return 2;
+            }
+        }
         else if (a == "--steps") nextInt(nOpts.steps);
         else if (a == "--batch") nextInt(nOpts.batch);
         else if (a == "--seed") { int s; nextInt(s); nOpts.seed = uint32_t(s); }
