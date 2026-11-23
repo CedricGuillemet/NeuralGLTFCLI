@@ -1,10 +1,11 @@
 #pragma once
 
 // Neural texture codec interface. A codec compresses the PBR texture set of one material
-// into latent images plus network weights stored in the BABYLON_materials_neural_texture
-// extension. "babylon-ntc-v1" (fixed 9 outputs), "babylon-ntc-v2" (variable outputs) and
-// "babylon-ntc-v3" (configurable grids and MLP) are implemented; others (e.g. NVIDIA RTXNTC) can be added by implementing INeuralCodec and
-// registering it in createNeuralCodec.
+// into the BABYLON_materials_neural_texture extension. "nvidia-ntc" (the default) embeds the .ntc
+// file produced by NVIDIA's ntc-cli in a bufferView. The legacy CUDA codecs "babylon-ntc-v1"
+// (fixed 9 outputs), "babylon-ntc-v2" (variable outputs) and "babylon-ntc-v3" (configurable grids
+// and MLP) store latent images plus network weights. New codecs implement INeuralCodec and are
+// registered in createNeuralCodec (codec_factory.cpp).
 
 #include <memory>
 #include <string>
@@ -65,6 +66,10 @@ struct NeuralMaterialOutput {
     // The codec has no glTF representation: no extension and no placeholders are written, the
     // material's slots are replaced by plain PNG textures built from `decoded`.
     bool bakeOnly = false;
+    // Container bitstream (nvidia-ntc): when non-empty it is stored unchanged in a bufferView referenced by
+    // the extension's bitstream.bufferView, and no latent textures or weights are written.
+    std::vector<uint8_t> bitstream;
+    tinygltf::Value::Object ntcInfo; // informative "ntc" object of the extension (bitstream codecs)
     // Optional names of the latent images (suffix of the glTF image/texture names), same order as latentImages.
     std::vector<std::string> latentNames;
     // Latent textures are sampled with NEAREST and no mipmaps (the shader interpolates manually).
@@ -77,8 +82,12 @@ class INeuralCodec {
 public:
     virtual ~INeuralCodec() = default;
     virtual std::string name() const = 0;
+    // Value of the extension's "codec" field (the versioned id; defaults to name()).
+    virtual std::string codecId() const { return name(); }
     virtual std::string deviceDescription() const = 0;
     // Weight floats expected in NeuralMaterialOutput::weights for N outputs (skipped when bakeOnly).
+    // Largest number of output channels one material can have; 0 = no limit beyond the canonical set.
+    virtual int maxOutputChannels() const { return 0; }
     virtual size_t expectedWeightCount(int outputs) const { return size_t(1856) + 33 * size_t(outputs); }
     // True if encode() uses NeuralMaterialInput::workDir.
     virtual bool usesWorkDir() const { return false; }
@@ -88,7 +97,9 @@ public:
 };
 
 std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::string& err);
-// Only built with -DGTC_WITH_NVIDIA_NTC=ON (src/neural/nvidia_ntc.cpp).
+// Only built with GTC_WITH_NVIDIA_NTC=ON (src/neural/nvidia_ntc.cpp).
 std::unique_ptr<INeuralCodec> createNvidiaNtcCodec(const NeuralOptions& opts, std::string& err);
+// Only built with GTC_WITH_CUDA_CODEC=ON (src/neural/babylon_ntc.cpp).
+std::unique_ptr<INeuralCodec> createBabylonNtcCodec(const NeuralOptions& opts, std::string& err);
 
 } // namespace gtc

@@ -5,14 +5,37 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
     set(CMAKE_CUDA_ARCHITECTURES 75-real 86-real 89-real 120)
 endif()
 
-project(gltf-texture-compressor VERSION 0.1.0 LANGUAGES C CXX CUDA)
+project(gltf-texture-compressor VERSION 0.1.0 LANGUAGES C CXX)
+
+# nvidia-ntc (default neural codec): runs NVIDIA's external ntc-cli; nothing is linked or redistributed.
+option(GTC_WITH_NVIDIA_NTC "Build the nvidia-ntc neural codec (runs the RTXNTC ntc-cli)" ON)
+# Legacy babylon-ntc-v1/v2/v3 CUDA codecs: AUTO builds them when a CUDA toolchain is found.
+set(GTC_WITH_CUDA_CODEC AUTO CACHE STRING "Build the legacy babylon-ntc CUDA codecs (AUTO, ON or OFF)")
+set_property(CACHE GTC_WITH_CUDA_CODEC PROPERTY STRINGS AUTO ON OFF)
+
+set(GTC_CUDA_ENABLED OFF)
+if(GTC_WITH_CUDA_CODEC STREQUAL "ON")
+    set(GTC_CUDA_ENABLED ON)
+elseif(GTC_WITH_CUDA_CODEC STREQUAL "AUTO")
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        set(GTC_CUDA_ENABLED ON)
+    endif()
+endif()
+if(NOT GTC_WITH_NVIDIA_NTC AND NOT GTC_CUDA_ENABLED)
+    message(FATAL_ERROR "No neural codec is enabled: use GTC_WITH_NVIDIA_NTC=ON and/or GTC_WITH_CUDA_CODEC=ON|AUTO (with a CUDA toolchain)")
+endif()
+if(GTC_CUDA_ENABLED)
+    enable_language(CUDA)
+    set(CMAKE_CUDA_STANDARD 17)
+    set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+    # Static CUDA runtime: the executable only needs the NVIDIA driver at run time.
+    set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-# Static CUDA runtime: the executable only needs the NVIDIA driver at run time.
-set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 include(FetchContent)
@@ -51,25 +74,29 @@ add_executable(gltf-texture-compressor
     src/ktx_encoder.cpp
     src/neural_pass.cpp
     src/third_party_impl.cpp
-    src/neural/babylon_ntc.cpp
+    src/neural/codec_factory.cpp
     src/neural/preset.cpp
-    src/uv_mask.cpp
-    src/neural/ntc_cuda.cu
-    src/neural/ntc_shape_0.cu
-    src/neural/ntc_shape_1.cu
-    src/neural/ntc_shape_2.cu
-    src/neural/ntc_shape_3.cu
-    src/neural/ntc_shape_4.cu
-    src/neural/ntc_shape_5.cu
-    src/neural/ntc_shape_6.cu
-    src/neural/ntc_shape_7.cu)
+    src/uv_mask.cpp)
 
-option(GTC_WITH_NVIDIA_NTC "Enable the nvidia-ntc comparison codec (runs the external RTXNTC ntc-cli; nothing is linked)" OFF)
 if(GTC_WITH_NVIDIA_NTC)
-    target_sources(gltf-texture-compressor PRIVATE src/neural/nvidia_ntc.cpp)
+    target_sources(gltf-texture-compressor PRIVATE src/neural/nvidia_ntc.cpp src/neural/ntc_container.cpp)
     target_compile_definitions(gltf-texture-compressor PRIVATE GTC_WITH_NVIDIA_NTC=1)
 endif()
 
+if(GTC_CUDA_ENABLED)
+    target_sources(gltf-texture-compressor PRIVATE
+        src/neural/babylon_ntc.cpp
+        src/neural/ntc_cuda.cu
+        src/neural/ntc_shape_0.cu
+        src/neural/ntc_shape_1.cu
+        src/neural/ntc_shape_2.cu
+        src/neural/ntc_shape_3.cu
+        src/neural/ntc_shape_4.cu
+        src/neural/ntc_shape_5.cu
+        src/neural/ntc_shape_6.cu
+        src/neural/ntc_shape_7.cu)
+    target_compile_definitions(gltf-texture-compressor PRIVATE GTC_WITH_CUDA_CODEC=1)
+endif()
 target_include_directories(gltf-texture-compressor PRIVATE src ${tinygltf_SOURCE_DIR})
 target_link_libraries(gltf-texture-compressor PRIVATE ktx)
 target_compile_definitions(gltf-texture-compressor PRIVATE
@@ -79,7 +106,9 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:/W3 /utf-8 /bigobj>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
 endif()
-target_compile_options(gltf-texture-compressor PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+if(GTC_CUDA_ENABLED)
+    target_compile_options(gltf-texture-compressor PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
+endif()
 
 install(TARGETS gltf-texture-compressor RUNTIME DESTINATION bin)
 
