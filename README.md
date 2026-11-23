@@ -21,7 +21,15 @@ gltf-texture-compressor FlightHelmet.glb --format ktx,neural --png
 | `-o, --output-dir <dir>` | Output directory (default: next to the input). |
 | `--png [dir]` | Also write the re-compressed textures and the originals as PNG (default `<output-dir>/<name>_png`), for comparison with image diff tools. |
 | `--etc1s-quality`, `--uastc-level`, `--uastc-rdo`, `--zstd`, `--uastc-color` | KTX2 encoder settings. |
-| `--steps`, `--batch`, `--seed`, `--cuda-device` | Neural training settings (default 6000 steps of 131072 samples per material). |
+| `--steps`, `--batch`, `--seed`, `--cuda-device` | Neural training settings (batch 131072 samples per material; default steps come from the preset: 24000 for `v2best` and the v3 presets, 6000 for legacy `v2`). |
+| `--neural-preset v2best\|v2\|v3s\|v3m\|v3l\|v3x` | Quality preset (default `v2best`). `v2` is the original 6000-step configuration. `v2best` keeps the `babylon-ntc-v2` file format and size but trains with the UV-coverage mask, texel-centre sampling and 24000 steps. `v3s`/`v3m`/`v3l`/`v3x` write `babylon-ntc-v3` (4-bit latents, 64-wide SiLU network, optional third grid): increasing quality and size. Explicit flags below override the preset. |
+| `--neural-grids div:ch:bits,...` | Custom latent grids from the finest to the coarsest, for example `4:16:4,16:16:4` (resolution divisor, channels, bits 4 or 8). A network that does not fit `babylon-ntc-v2` is written as `babylon-ntc-v3`. |
+| `--neural-hidden <n>`, `--neural-layers <n>`, `--neural-activation relu\|silu\|hgelu` | Hidden width (32, 48 or 64), number of hidden layers (2 or 3) and activation of the decoder MLP. |
+| `--neural-uv-mask on\|off` | Rasterise the UV islands of the meshes using the material and train/evaluate only inside them (plus a small weight outside, so the padding stays plausible). Also reports masked PSNR. |
+| `--neural-sampling continuous\|texel\|mixed:p` | Training sample positions: continuous UVs, texel centres (what the decoder sees at load time) or a mix. |
+| `--neural-importance <x>` | Weight sampling towards high-gradient regions (0 = uniform). |
+| `--neural-loss l2\|charbonnier`, `--neural-loss-weights name=w,...` | Training loss and per-group weights (`base`, `alpha`, `normal`, `occlusion`, `roughness`, `metallic`, `emissive`, `diffuse`, `specular`, `glossiness`). |
+| `--neural-finetune-steps`, `--neural-finetune-lr lr[:end]`, `--neural-warmup`, `--neural-beta2`, `--neural-quant noise\|ste` | Optimiser schedule and quantisation-aware training options (experimental; no measurable gain on the reference, see the experiment log). |
 | `--neural-codec babylon-ntc-v2\|babylon-ntc-v1` | Neural codec (default `babylon-ntc-v2`). v2 also encodes emissive and `KHR_materials_pbrSpecularGlossiness` diffuse and specular-glossiness textures with a variable number of outputs. v1 writes the original format, core PBR slots only. |
 | `--neural-specgloss encode\|ignore` | Whether v2 encodes the spec-gloss textures (default `encode`). `ignore` keeps them as regular textures. |
 | `--neural-fallback-size <n>` | Keep downscaled originals (max width `n`) in the replaced slots for viewers without the extension, instead of 1x1 placeholders. |
@@ -84,31 +92,34 @@ Per-group PSNR (dB) of the decoded neural textures against the sources, per mate
 
 ## Neural quality and size
 
-The size of a neural material is fixed by the codec layout, not by the content: two 8-channel latent grids at 1/4 and 1/16 of the texture resolution, stored as raw 8-bit values. For a 2048x2048 material that is 512x512x8 + 128x128x8 bytes = 2.13 MiB, plus about 8 KiB of MLP weights, whatever the textures contain. Measured PSNR on the results above ranges from about 26 dB to 58 dB per channel, with most channels between 30 and 45 dB.
+The size of a neural material is fixed by the preset, not by the content. The default (`v2best`) keeps two 8-channel 8-bit latent grids at 1/4 and 1/16 of the texture resolution: for a 2048x2048 material that is 512x512x8 + 128x128x8 bytes = 2.13 MiB, plus about 8 KiB of MLP weights. Measured PSNR on the results above ranges from about 26 dB to 58 dB per channel, with most channels between 30 and 45 dB.
 
-Settings available today:
+Quality presets (`--neural-preset`), measured on FlightHelmet `LeatherPartsMat` (2048x2048, UV-masked PSNR, 24000 steps, seed 1; see `tools/quality/experiment.py` and `output/quality/experiments.csv`):
+
+| Preset | Latents per material | Base / normal PSNR (masked) | Training time (RTX 4060) |
+|---|---|---|---|
+| `v2` (legacy, 6000 steps) | 2.13 MiB, 8-bit | 33.3 / 27.1 dB | 26 s |
+| `v2best` (default) | 2.13 MiB, 8-bit | 33.2 / 29.3 dB (+3.2 dB normal vs `v2` on the same mask) | 95 s |
+| `v3s` | 2.1 MiB, 4-bit | 34.8 / 31.7 dB | 6 min |
+| `v3m` | 3.1 MiB | 36.1 / 33.4 dB | 6.5 min |
+| `v3l` | 6.1 MiB | 42.7 / 37.1 dB | 7.5 min |
+| `v3x` | 10.1 MiB | 47.5 / 45.8 dB | 22 min |
+
+`v2best` gains come from training only on texels covered by the mesh UVs (`--neural-uv-mask`), sampling texel centres (`--neural-sampling texel`) and 4x more steps. STE quantisation, warmup, fine-tune LR schedules, Charbonnier loss, importance sampling and loss re-weighting showed no measurable gain. `v3*` files need a reader that supports `babylon-ntc-v3`.
+
+Other settings:
 
 | Option | Effect |
 |---|---|
-| `--steps` (default 6000), `--batch` (default 131072) | More training steps or a larger batch improve PSNR. The file size does not change. |
+| `--steps`, `--batch` | More training steps or a larger batch improve PSNR. The file size does not change. |
 | `--seed` | Only changes run-to-run variation. |
 | `--neural-fallback-size <n>` | Keeps downscaled originals in the replaced slots for viewers without the extension. This makes the file larger. |
-
-The size/quality balance itself is set by compile-time constants in `src/neural/ntc_cuda.h`:
-
-| Constant | Current value | Effect |
-|---|---|---|
-| `kHiDiv`, `kLoDiv` | 4, 16 | Latent grid resolution divisors. Larger values give smaller files and lower quality. |
-| `kLatentChannels` | 8 | Channels per latent grid. Fewer channels give smaller files and lower quality. |
-| `kHidden` | 32 | MLP width. The weights are only about 8 KiB, so this mostly affects decode cost, not file size. |
-
-Changing these requires a rebuild, and files written with different values are not compatible with the current `babylon-ntc-v1` layout.
+| `--neural-grids`, `--neural-hidden`, `--neural-layers` | Custom latent grids and MLP shape (see the options table). |
 
 Possible improvements, not implemented yet:
 
-- A `--quality` / `--latent-div` option exposing the latent resolution.
-- Lower latent bit depth (for example 6 or 4 bits) and entropy coding (zstd or bit packing) of the latents.
-- A `--latent-channels` option.
+- Entropy coding (zstd) of the latents.
+- Gradient loss, PCA initialisation of the latents and packing the four textures of a material into one image.
 - Skipping materials that have too few PBR slots to amortize the fixed latent cost (see the coverage column above).
 
 ## Neural codec

@@ -48,9 +48,9 @@ The extension is listed in `extensionsUsed` only. Replaced slots still point to 
 | Property | Description |
 |---|---|
 | `version` | Extension version, currently 1. |
-| `codec` | Network and latent layout: `babylon-ntc-v1` or `babylon-ntc-v2`. A reader that does not know the codec must ignore the extension (see [Unknown codecs](#unknown-codecs)). |
+| `codec` | Network and latent layout: `babylon-ntc-v1`, `babylon-ntc-v2` or `babylon-ntc-v3`. A reader that does not know the codec must ignore the extension (see [Unknown codecs](#unknown-codecs)). |
 | `resolution` | Resolution of the source textures (informative). |
-| `latentTextures` | Texture infos for the latent images, in codec order. They must be sampled as linear data (not sRGB) with bilinear filtering and repeat wrapping, using `TEXCOORD_0`. |
+| `latentTextures` | Texture infos for the latent images, in codec order. They must be sampled as linear data (not sRGB) with bilinear filtering (NEAREST with manual bilinear in v3) and repeat wrapping, using `TEXCOORD_0`. |
 | `weights` | `bufferView` holding little-endian float32 network parameters. |
 | `outputs` | Network output channel indices for each material property. |
 | `replacedSlots` | Core texture slots whose texture is superseded by the network. Their factors (`baseColorFactor`, `normalTexture.scale`...) still apply to the decoded values. |
@@ -149,9 +149,62 @@ Decode: the network is evaluated exactly as in v1 (`24 -> 32 (ReLU) -> 32 (ReLU)
 
 A reader that does not recognise `codec` (for example a v1-only loader seeing `babylon-ntc-v2`) must ignore the extension for that material and use the textures referenced by the material as they are: placeholders, or the downscaled originals written with `--neural-fallback-size`. It must not attempt to decode the weights.
 
+## Codec `babylon-ntc-v3`
+
+`babylon-ntc-v3` generalises v2 for the higher-quality presets (`v3s`, `v3m`, `v3l`, `v3x`): any number of latent grids, 4-bit or 8-bit latents, any number of hidden layers and a choice of activation. The output channel table (20 canonical channels, `outputs` ranges) and the `replacedSlots` rules are **identical to v2**. The v2 layout is unchanged; the encoder keeps writing v2 (`--neural-preset v2best`, the default) unless a v3 preset or a non-v2 network shape is requested.
+
+### Example
+
+```json
+"BABYLON_materials_neural_texture": {
+  "version": 1,
+  "codec": "babylon-ntc-v3",
+  "resolution": [2048, 2048],
+  "latentTextures": [{ "index": 0 }, { "index": 1 }, { "index": 2 }, { "index": 3 }, { "index": 4 }, { "index": 5 }, { "index": 6 }, { "index": 7 }],
+  "grids": [
+    { "resolution": [512, 512], "channels": 24, "bits": 4, "sampling": "bilinear", "textures": [0, 1, 2] },
+    { "resolution": [128, 128], "channels": 16, "bits": 4, "sampling": "bilinear", "textures": [3, 4] }
+  ],
+  "weights": { "bufferView": 8, "componentType": 5126,   "count": 8596 },
+  "network": {
+    "inputs": 48, "hidden": [64, 64], "outputs": 20, "activation": "silu",
+    "inputLayout": ["grid0", "grid1", "posenc"],
+    "positionalEncoding": { "frequencies": [1, 2], "grid": 0 },
+    "weightLayout": "W0[in][out],b0,W1,b1,W2,b2 float32"
+  },
+  "outputs": { "baseColor": [0, 4], "normal": [4, 2], "occlusion": [6, 1], "roughness": [7, 1], "metallic": [8, 1] },
+  "replacedSlots": ["baseColorTexture", "normalTexture", "occlusionTexture", "metallicRoughnessTexture"]
+}
+```
+
+(The numbers above are illustrative; `hiResolution`, `loResolution` and `latentChannels` of v2 are replaced by `grids`.)
+
+### Latent grids
+
+- `grids[]` lists the grids from the **finest (grid 0) to the coarsest**. Each entry has the grid `resolution` `[w, h]`, the number of `channels`, the `bits` per channel (4 or 8), and `textures`: the indices into `latentTextures` holding the grid.
+- A grid texel is `channels * bits` bits, stored as `ceil(channels * bits / 32)` RGBA8 images (`textures`, in order). Byte `j` of the texel is component `j % 4` of image `j / 4`; bytes past the end are 0.
+  - 8-bit: byte `j` is channel `j`.
+  - 4-bit: byte `k` holds channel `2k` in the high nibble and channel `2k + 1` in the low nibble.
+- Decoded value: `q / (2^bits - 1)`, so 8-bit is `byte / 255` and 4-bit is `nibble / 15`.
+- Latent images are written with a **NEAREST** sampler without mipmaps and `REPEAT` wrapping (they must be sampled as linear data). The reader performs the bilinear interpolation itself, with the same texel-centre convention as hardware bilinear (`p = uv * resolution - 0.5`, `REPEAT` wrap on the four taps), so that 4-bit values are interpolated after unpacking. Using a hardware-filtered sampler on packed 4-bit data is incorrect.
+- Because the grids are sampled at texel centres during training, the reader must use `TEXCOORD_0` unmodified.
+
+### Network
+
+- **Inputs:** `network.inputLayout` gives the order, `grid0`, `grid1`, ... then `posenc`; the grid channels appear in channel order. `network.inputs` is the sum of grid channels plus 8.
+- **Positional encoding (8 values):** `fx = fract(u * w0)`, `fy = fract(v * h0)` with `(w0, h0)` the resolution of the grid named by `positionalEncoding.grid` (0, the finest), then
+  `sin(2 pi fx), sin(2 pi fy), cos(2 pi fx), cos(2 pi fy), sin(4 pi fx), sin(4 pi fy), cos(4 pi fx), cos(4 pi fy)`.
+- **Layers:** `hidden` lists the width of each hidden layer; `activation` is `relu`, `silu` (`z * sigmoid(z)`) or `hgelu` (`min(z, 3) * clamp(z / 3 + 0.5, 0, 1)`); the output layer is linear and clamped to `[0,1]` after decode.
+- **Weights:** float32, `W0[in][out], b0, W1, b1, ..., Wn, bn`; the count is the sum over layers of `(in_l + 1) * out_l`, with the last layer having `N = network.outputs` outputs. `network.weightLayout` repeats the layer list.
+
+### Reader requirements
+
+A reader supporting v3 must implement the generic packing above (not a fixed shape): it may bound the supported network (the encoder's presets use at most 56 inputs, 3 hidden layers of 64 and at most 3 grids), and must ignore the extension for the material otherwise (see [Unknown codecs](#unknown-codecs)).
+
 ## Limitations
 
 - Materials using `KHR_texture_transform` or a `texCoord` other than 0 on a texture slot are left untouched for that slot.
 - `babylon-ntc-v1` only replaces the core PBR slots; emissive and extension textures are kept as they are. `babylon-ntc-v2` also replaces emissive and the spec-gloss textures.
 - Slots of one material with different resolutions are resampled to the largest resolution before encoding.
-- With `babylon-ntc-v2`, materials whose textures are smaller than 64 pixels are not encoded.
+- With `babylon-ntc-v2` and `babylon-ntc-v3`, materials whose textures are smaller than 64 pixels are not encoded.
+- `babylon-ntc-v3` needs a reader that implements the generic grid/MLP layout; the Babylon.js loader support for v3 is tracked separately.
