@@ -82,5 +82,7 @@ public:
 };
 
 std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::string& err);
+// Only built with -DGTC_WITH_NVIDIA_NTC=ON (src/neural/nvidia_ntc.cpp).
+std::unique_ptr<INeuralCodec> createNvidiaNtcCodec(const NeuralOptions& opts, std::string& err);
 
 } // namespace gtc

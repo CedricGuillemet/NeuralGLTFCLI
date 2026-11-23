@@ -41,6 +41,15 @@ struct NeuralOptions {
     std::string metricsPath;              // if set, write the metrics sidecar JSON here
     std::string workDir;                  // per-material scratch directories are created under this
     std::string commandLine;              // recorded in the metrics
+
+    // "nvidia-ntc" codec (bake-only comparison, runs the external RTXNTC ntc-cli).
+    std::string ntcCli;                   // path to ntc-cli (or the NTC_CLI environment variable)
+    double ntcBpp = 0;                    // target bits per pixel for every material (0: unset)
+    std::string ntcMatch;                 // metrics JSON whose per-material sizes set the target bpp
+    std::string ntcSuffix = "nvidia-ntc"; // output name <name>_<suffix>.glb
+    std::string ntcArgs;                  // extra arguments passed to ntc-cli
+    std::string ntcSnap = "nearest";      // nearest: pick the latent shape closest to the target bpp, ntc: ntc-cli -b
+    bool ntcKeepImages = false;           // keep the input/decoded PNGs in the work directory
 };
 
 inline double secondsSince(std::chrono::steady_clock::time_point t0) {

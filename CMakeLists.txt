@@ -54,6 +54,12 @@ add_executable(gltf-texture-compressor
     src/neural/babylon_ntc.cpp
     src/neural/ntc_cuda.cu)
 
+option(GTC_WITH_NVIDIA_NTC "Enable the nvidia-ntc comparison codec (runs the external RTXNTC ntc-cli; nothing is linked)" OFF)
+if(GTC_WITH_NVIDIA_NTC)
+    target_sources(gltf-texture-compressor PRIVATE src/neural/nvidia_ntc.cpp)
+    target_compile_definitions(gltf-texture-compressor PRIVATE GTC_WITH_NVIDIA_NTC=1)
+endif()
+
 target_include_directories(gltf-texture-compressor PRIVATE src ${tinygltf_SOURCE_DIR})
 target_link_libraries(gltf-texture-compressor PRIVATE ktx)
 target_compile_definitions(gltf-texture-compressor PRIVATE

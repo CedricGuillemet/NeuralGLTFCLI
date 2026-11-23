@@ -123,7 +123,15 @@ private:
 std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::string& err) {
     if (opts.codec == "babylon-ntc-v1") return std::make_unique<BabylonNtc>(opts, NeuralCodecVersion::V1);
     if (opts.codec == "babylon-ntc-v2") return std::make_unique<BabylonNtc>(opts, NeuralCodecVersion::V2);
-    err = "unknown neural codec '" + opts.codec + "' (available: babylon-ntc-v1, babylon-ntc-v2)";
+    if (opts.codec == "nvidia-ntc") {
+#ifdef GTC_WITH_NVIDIA_NTC
+        return createNvidiaNtcCodec(opts, err);
+#else
+        err = "the nvidia-ntc codec is not built in; reconfigure with -DGTC_WITH_NVIDIA_NTC=ON";
+        return nullptr;
+#endif
+    }
+    err = "unknown neural codec '" + opts.codec + "' (available: babylon-ntc-v1, babylon-ntc-v2, nvidia-ntc)";
     return nullptr;
 }
 

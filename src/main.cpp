@@ -48,7 +48,17 @@ void printUsage() {
         "                             textures in a standard glTF (no extension needed to view it)\n"
         "      --neural-materials <list>\n"
         "                             only encode the comma-separated material names (others are left untouched)\n\n"
-        "Outputs are written as <name>_ktx.glb and <name>_neural.glb.\n",
+        "Outputs are written as <name>_ktx.glb and <name>_neural.glb.\n\n"
+        "nvidia-ntc comparison codec (-f nvidia-ntc, needs a build with -DGTC_WITH_NVIDIA_NTC=ON and the RTXNTC ntc-cli):\n"
+        "      --ntc-cli <path>       ntc-cli executable (or set the NTC_CLI environment variable)\n"
+        "      --ntc-bpp <x>          target bits per pixel for every material\n"
+        "      --ntc-match <json>     per-material target bpp from a metrics JSON (e.g. a neural run's .metrics.json)\n"
+        "      --ntc-suffix <s>       output name <name>_<s>.glb (default nvidia-ntc); also writes <name>_<s>.metrics.json\n"
+        "      --ntc-args \"<args>\"    extra arguments for ntc-cli (e.g. \"-S 200000\"); -b/-p/--gridSizeScale override the rate\n"
+        "      --ntc-snap <nearest|ntc>\n"
+        "                             nearest (default): latent shape closest to the target bpp; ntc: ntc-cli -b (rounds down)\n"
+        "      --ntc-keep-images      keep the input and decoded PNGs in the work directory\n"
+        "The result is baked: plain PNG textures in a standard glTF (the .ntc file is only used for the size).\n",
         GTC_VERSION);
 }
 
@@ -112,6 +122,19 @@ int main(int argc, char** argv) {
         else if (a == "--cuda-device") nextInt(nOpts.cudaDevice);
         else if (a == "--neural-fallback-size") nextInt(nOpts.fallbackSize);
         else if (a == "--neural-suffix") neuralSuffix = next("a suffix");
+        else if (a == "--ntc-cli") nOpts.ntcCli = next("a path");
+        else if (a == "--ntc-bpp") nOpts.ntcBpp = std::atof(next("a number"));
+        else if (a == "--ntc-match") nOpts.ntcMatch = next("a metrics JSON path");
+        else if (a == "--ntc-suffix") nOpts.ntcSuffix = next("a suffix");
+        else if (a == "--ntc-args") nOpts.ntcArgs = next("an argument string");
+        else if (a == "--ntc-snap") {
+            nOpts.ntcSnap = next("nearest or ntc");
+            if (nOpts.ntcSnap != "nearest" && nOpts.ntcSnap != "ntc") {
+                std::fprintf(stderr, "error: --ntc-snap expects nearest or ntc\n");
+                return 2;
+            }
+        }
+        else if (a == "--ntc-keep-images") nOpts.ntcKeepImages = true;
         else if (a == "--neural-bake") neuralBake = true;
         else if (a == "--neural-materials") {
             std::string list = next("a comma-separated material list");
@@ -128,14 +151,15 @@ int main(int argc, char** argv) {
     }
     if (input.empty()) { printUsage(); return 2; }
 
-    bool doKtx = false, doNeural = false;
+    bool doKtx = false, doNeural = false, doNtc = false;
     for (size_t s = 0; s <= formats.size();) {
         size_t e = formats.find(',', s);
         if (e == std::string::npos) e = formats.size();
         std::string f = formats.substr(s, e - s);
         if (f == "ktx" || f == "ktx2") doKtx = true;
         else if (f == "neural") doNeural = true;
-        else { std::fprintf(stderr, "error: unknown format '%s' (expected ktx or neural)\n", f.c_str()); return 2; }
+        else if (f == "nvidia-ntc") doNtc = true;
+        else { std::fprintf(stderr, "error: unknown format '%s' (expected ktx, neural or nvidia-ntc)\n", f.c_str()); return 2; }
         s = e + 1;
     }
     if (nOpts.steps < 1 || nOpts.batch < 64) { std::fprintf(stderr, "error: --steps must be >= 1 and --batch >= 64\n"); return 2; }
@@ -186,6 +210,18 @@ int main(int argc, char** argv) {
         nOpts.commandLine = cl;
     }
     if (doNeural && !run(nOpts.tag, [&](Document& d, const std::string& p) { return runNeuralPass(d, nOpts, p, err); })) return 1;
+    if (doNtc) {
+        NeuralOptions nt = nOpts;
+        nt.codec = "nvidia-ntc";
+        nt.tag = nOpts.ntcSuffix.empty() ? "nvidia-ntc" : nOpts.ntcSuffix;
+        nt.bakedPath.clear();
+        nt.metricsPath = fromPath(out / (stem + "_" + nt.tag + ".metrics.json"));
+        nt.workDir = fromPath(out / (stem + "_" + nt.tag + "_work"));
+        std::string cl;
+        for (int i = 1; i < argc; ++i) cl += (i > 1 ? " " : "") + std::string(argv[i]);
+        nt.commandLine = cl;
+        if (!run(nt.tag, [&](Document& d, const std::string& p) { return runNeuralPass(d, nt, p, err); })) return 1;
+    }
 
     std::printf("\nSummary\n  input   %12llu bytes  %s\n", (unsigned long long)info.inputBytes, input.c_str());
     for (auto& r : reports)
