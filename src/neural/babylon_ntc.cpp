@@ -22,6 +22,14 @@ public:
 
     std::string name() const override { return version_ == NeuralCodecVersion::V1 ? "babylon-ntc-v1" : "babylon-ntc-v2"; }
     std::string deviceDescription() const override { return "CUDA device " + std::to_string(cfg_.device) + ": " + ntc::deviceName(cfg_.device); }
+    tinygltf::Value::Object describeParameters() const override {
+        tinygltf::Value::Object p;
+        p["hidden"] = Value(ntc::kHidden);
+        p["latentChannels"] = Value(ntc::kLatentChannels);
+        p["hiDiv"] = Value(ntc::kHiDiv);
+        p["loDiv"] = Value(ntc::kLoDiv);
+        return p;
+    }
 
     bool encode(const NeuralMaterialInput& in, NeuralMaterialOutput& out, std::string& err) override {
         static_assert(ntc::kOutputs == kMaxNeuralChannels);

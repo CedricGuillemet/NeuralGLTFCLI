@@ -41,7 +41,13 @@ void printUsage() {
         "      --cuda-device <n>      CUDA device index (default 0)\n"
         "      --neural-fallback-size <n>\n"
         "                             keep downscaled original textures (max width n) for loaders without\n"
-        "                             BABYLON_materials_neural_texture support (default: 1x1 placeholders)\n\n"
+        "                             BABYLON_materials_neural_texture support (default: 1x1 placeholders)\n"
+        "      --neural-suffix <s>    name the neural output <name>_neural_<s>.glb (PNGs go in <png dir>/neural_<s>/)\n"
+        "                             and also write <name>_neural_<s>.metrics.json\n"
+        "      --neural-bake          also write <name>_neural[_<s>]_baked.glb: the decoded textures as plain PNG\n"
+        "                             textures in a standard glTF (no extension needed to view it)\n"
+        "      --neural-materials <list>\n"
+        "                             only encode the comma-separated material names (others are left untouched)\n\n"
         "Outputs are written as <name>_ktx.glb and <name>_neural.glb.\n",
         GTC_VERSION);
 }
@@ -59,7 +65,8 @@ bool parseInt(const char* s, int& out) {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::string input, outDir, pngDir, formats = "ktx";
-    bool png = false;
+    std::string neuralSuffix;
+    bool png = false, neuralBake = false;
     KtxOptions ktxOpts;
     NeuralOptions nOpts;
 
@@ -104,6 +111,17 @@ int main(int argc, char** argv) {
         else if (a == "--seed") { int s; nextInt(s); nOpts.seed = uint32_t(s); }
         else if (a == "--cuda-device") nextInt(nOpts.cudaDevice);
         else if (a == "--neural-fallback-size") nextInt(nOpts.fallbackSize);
+        else if (a == "--neural-suffix") neuralSuffix = next("a suffix");
+        else if (a == "--neural-bake") neuralBake = true;
+        else if (a == "--neural-materials") {
+            std::string list = next("a comma-separated material list");
+            for (size_t s = 0; s <= list.size();) {
+                size_t e = list.find(',', s);
+                if (e == std::string::npos) e = list.size();
+                if (e > s) nOpts.materials.push_back(list.substr(s, e - s));
+                s = e + 1;
+            }
+        }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "error: unknown option %s (see --help)\n", a.c_str()); return 2; }
         else if (input.empty()) input = a;
         else { std::fprintf(stderr, "error: unexpected argument %s\n", a.c_str()); return 2; }
@@ -156,7 +174,18 @@ int main(int argc, char** argv) {
     };
 
     if (doKtx && !run("ktx", [&](Document& d, const std::string& p) { return runKtxPass(d, ktxOpts, p, err); })) return 1;
-    if (doNeural && !run("neural", [&](Document& d, const std::string& p) { return runNeuralPass(d, nOpts, p, err); })) return 1;
+    if (doNeural) {
+        nOpts.tag = neuralSuffix.empty() ? "neural" : "neural_" + neuralSuffix;
+        if (neuralBake) nOpts.bakedPath = fromPath(out / (stem + "_" + nOpts.tag + "_baked.glb"));
+        if (!neuralSuffix.empty() || neuralBake) {
+            nOpts.metricsPath = fromPath(out / (stem + "_" + nOpts.tag + ".metrics.json"));
+            nOpts.workDir = fromPath(out / (stem + "_" + nOpts.tag + "_work"));
+        }
+        std::string cl;
+        for (int i = 1; i < argc; ++i) cl += (i > 1 ? " " : "") + std::string(argv[i]);
+        nOpts.commandLine = cl;
+    }
+    if (doNeural && !run(nOpts.tag, [&](Document& d, const std::string& p) { return runNeuralPass(d, nOpts, p, err); })) return 1;
 
     std::printf("\nSummary\n  input   %12llu bytes  %s\n", (unsigned long long)info.inputBytes, input.c_str());
     for (auto& r : reports)

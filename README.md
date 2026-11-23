@@ -25,11 +25,16 @@ gltf-texture-compressor FlightHelmet.glb --format ktx,neural --png
 | `--neural-codec babylon-ntc-v2\|babylon-ntc-v1` | Neural codec (default `babylon-ntc-v2`). v2 also encodes emissive and `KHR_materials_pbrSpecularGlossiness` diffuse and specular-glossiness textures with a variable number of outputs. v1 writes the original format, core PBR slots only. |
 | `--neural-specgloss encode\|ignore` | Whether v2 encodes the spec-gloss textures (default `encode`). `ignore` keeps them as regular textures. |
 | `--neural-fallback-size <n>` | Keep downscaled originals (max width `n`) in the replaced slots for viewers without the extension, instead of 1x1 placeholders. |
+| `--neural-suffix <s>` | Name the neural output `<name>_neural_<s>.glb`, put the `--png` decoded textures in `neural_<s>/`, and write a `<name>_neural_<s>.metrics.json` sidecar (sizes, bits per pixel, per-group PSNR, encode time, parameters, seed, git SHA). |
+| `--neural-bake` | Also write `<name>_neural[_<s>]_baked.glb`: the decoded textures stored as plain PNG textures in a standard glTF (no extension needed), equivalent to the load-time bake. |
+| `--neural-materials <a,b>` | Only encode the listed materials; the others keep their original textures. Useful for fast sweeps. |
 
 PNG output layout:
 
 - `original/<image>.png` and `ktx/<image>.png`: each source image and its KTX2 version transcoded back to RGBA.
-- `original/<material>_{baseColor,normal,occlusionRoughnessMetallic,emissive,diffuse,specular,glossiness}.png` and `neural/...`: the neural network inputs and the decoded network outputs, at the source resolution (only for the groups that are encoded). Normal maps have Z reconstructed from X/Y in both versions so they compare fairly.
+- `original/<material>_{baseColor,normal,occlusionRoughnessMetallic,emissive,diffuse,specular,glossiness}.png` and `neural/...` (or `neural_<s>/...`): the neural network inputs and the decoded network outputs, at the source resolution (only for the groups that are encoded). Normal maps have Z reconstructed from X/Y in both versions so they compare fairly.
+
+`tools/quality/` has the evaluation scripts for these outputs: `eval.py` (PSNR, SSIM and high-frequency PSNR per material and channel group, error heatmaps, fixed crops; needs numpy and Pillow), `capture.mjs` (playground screenshots and MAE through Playwright) and `montage.py`.
 
 ## Building
 

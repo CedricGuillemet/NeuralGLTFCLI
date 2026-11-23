@@ -1,12 +1,19 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <map>
+#include <memory>
 
 #include "gltf_io.h"
 #include "image.h"
 #include "neural/codec.h"
 #include "passes.h"
+
+#ifndef GTC_GIT_SHA
+#define GTC_GIT_SHA "unknown"
+#endif
 
 namespace fs = std::filesystem;
 
@@ -156,6 +163,12 @@ double psnr(const std::vector<float>& a, const std::vector<float>& b, size_t tex
 
 uint8_t toU8(float v) { return uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); }
 
+// Z of a unit normal stored as XY in [0,1], remapped to [0,1].
+float normalZ(float nx, float ny) {
+    float x = std::clamp(nx, 0.0f, 1.0f) * 2 - 1, y = std::clamp(ny, 0.0f, 1.0f) * 2 - 1;
+    return std::sqrt(std::max(0.0f, 1 - x * x - y * y)) * 0.5f + 0.5f;
+}
+
 // Writes the comparison images: base color, normal with reconstructed Z, packed
 // occlusion/roughness/metallic, emissive, diffuse, specular and glossiness.
 void writeComparisonPngs(const fs::path& dir, const std::string& prefix, const std::vector<float>& d, int stride, int w, int h,
@@ -178,10 +191,9 @@ void writeComparisonPngs(const fs::path& dir, const std::string& prefix, const s
     if (ch.has(GBase)) rgbGroup("baseColor", GBase, alpha);
     if (ch.has(GNormal)) {
         Image img = make([&](const float* p, uint8_t* o) {
-            float x = std::clamp(at(p, GNormal, 0), 0.0f, 1.0f) * 2 - 1, y = std::clamp(at(p, GNormal, 1), 0.0f, 1.0f) * 2 - 1;
             o[0] = toU8(at(p, GNormal, 0));
             o[1] = toU8(at(p, GNormal, 1));
-            o[2] = toU8(std::sqrt(std::max(0.0f, 1 - x * x - y * y)) * 0.5f + 0.5f);
+            o[2] = toU8(normalZ(at(p, GNormal, 0), at(p, GNormal, 1)));
             o[3] = 255;
         });
         writePng(fromPath(dir / (prefix + "_normal.png")), img, 3);
@@ -218,6 +230,143 @@ struct Placeholders {
     }
 };
 
+// Plain PNG for one replaced slot, built from the decoded network output with the same packing as
+// writeComparisonPngs. sharedOrm packs occlusion, roughness and metallic into one image (R, G, B).
+Image packSlotImage(int id, const std::vector<float>& d, int stride, int w, int h, const Channels& ch, bool alpha, bool sharedOrm,
+                    int& channels) {
+    const size_t n = size_t(w) * h;
+    Image img{w, h};
+    img.rgba.resize(n * 4);
+    auto at = [&](const float* p, int g, int c) { return ch.has(g) && c < ch.comps[g] ? p[ch.start[g] + c] : 0.0f; };
+    auto rgb = [&](int g, bool withAlpha) {
+        const bool a = withAlpha && ch.comps[g] > 3;
+        channels = a ? 4 : 3;
+        for (size_t i = 0; i < n; ++i) {
+            const float* p = &d[i * stride];
+            uint8_t* o = &img.rgba[i * 4];
+            for (int c = 0; c < 3; ++c) o[c] = toU8(at(p, g, c));
+            o[3] = a ? toU8(at(p, g, 3)) : 255;
+        }
+    };
+    channels = 3;
+    switch (id) {
+    case SBase: rgb(GBase, alpha); break;
+    case SEmissive: rgb(GEmissive, false); break;
+    case SDiffuse: rgb(GDiffuse, alpha); break;
+    case SNormal:
+        for (size_t i = 0; i < n; ++i) {
+            const float* p = &d[i * stride];
+            uint8_t* o = &img.rgba[i * 4];
+            o[0] = toU8(at(p, GNormal, 0));
+            o[1] = toU8(at(p, GNormal, 1));
+            o[2] = toU8(normalZ(at(p, GNormal, 0), at(p, GNormal, 1)));
+            o[3] = 255;
+        }
+        break;
+    case SOcc:
+    case SMr:
+        for (size_t i = 0; i < n; ++i) {
+            const float* p = &d[i * stride];
+            uint8_t* o = &img.rgba[i * 4];
+            const uint8_t occ = ch.has(GOcc) ? toU8(at(p, GOcc, 0)) : 255;
+            if (id == SOcc && !sharedOrm) {
+                o[0] = o[1] = o[2] = occ;
+            } else {
+                o[0] = id == SMr && !sharedOrm ? 255 : occ;
+                o[1] = toU8(at(p, GRough, 0));
+                o[2] = toU8(at(p, GMetal, 0));
+            }
+            o[3] = 255;
+        }
+        break;
+    case SSpecGloss:
+        channels = 4;
+        for (size_t i = 0; i < n; ++i) {
+            const float* p = &d[i * stride];
+            uint8_t* o = &img.rgba[i * 4];
+            for (int c = 0; c < 3; ++c) o[c] = toU8(at(p, GSpec, c));
+            o[3] = toU8(ch.has(GGloss) ? at(p, GGloss, 0) : 1.0f);
+        }
+        break;
+    }
+    return img;
+}
+
+// Replaces the active slots of a material by plain PNG textures built from the decoded output. `target`
+// are the slots of the material to modify in `d`; `src` are the slots as gathered from the input (their
+// texture indices are valid in `d` because textures are only ever appended).
+void bakeSlots(Document& d, Slot (&target)[SlotCount], const Slot (&src)[SlotCount], const std::vector<float>& decoded, int stride, int w,
+               int h, const Channels& ch, bool alpha, const std::string& label) {
+    const bool sharedOrm = src[SOcc].active && src[SMr].active && src[SOcc].tex == src[SMr].tex;
+    int ormTexture = -1;
+    for (int id = 0; id < SlotCount; ++id) {
+        if (!src[id].active) continue;
+        const bool orm = sharedOrm && (id == SOcc || id == SMr);
+        if (orm && ormTexture >= 0) {
+            target[id].setIndex(ormTexture);
+            continue;
+        }
+        int channels = 3;
+        Image img = packSlotImage(id, decoded, stride, w, h, ch, alpha, orm, channels);
+        const std::string name = label + "_baked_" + kSlots[id].kind;
+        int image = d.addImage(encodePng(img, channels), "image/png", name);
+        int tex = d.addTexture(image, d.model.textures[src[id].tex].sampler, name);
+        target[id].setIndex(tex);
+        if (orm) ormTexture = tex;
+    }
+}
+
+// Minimal JSON serialization of tinygltf values for the metrics sidecar.
+void writeJson(std::string& out, const Value& v, int indent) {
+    const std::string pad(size_t(indent) * 2, ' '), pad2(size_t(indent + 1) * 2, ' ');
+    char buf[64];
+    if (v.IsString()) {
+        out += '"';
+        for (char c : v.Get<std::string>()) {
+            if (c == '"' || c == '\\') out += '\\', out += c;
+            else if (c == '\n') out += "\\n";
+            else if (c == '\t') out += "\\t";
+            else if ((unsigned char)c < 0x20) out += ' ';
+            else out += c;
+        }
+        out += '"';
+    } else if (v.IsBool()) {
+        out += v.Get<bool>() ? "true" : "false";
+    } else if (v.IsInt()) {
+        out += std::to_string(v.Get<int>());
+    } else if (v.IsReal()) {
+        double x = v.Get<double>();
+        if (std::floor(x) == x && std::fabs(x) < 1e15) std::snprintf(buf, sizeof(buf), "%.0f", x);
+        else std::snprintf(buf, sizeof(buf), "%.6g", x);
+        out += buf;
+    } else if (v.IsArray()) {
+        const auto& a = v.Get<Value::Array>();
+        const bool flat = std::all_of(a.begin(), a.end(), [](const Value& e) { return !e.IsArray() && !e.IsObject(); });
+        out += '[';
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (!flat) out += "\n" + pad2;
+            else if (i) out += ", ";
+            writeJson(out, a[i], indent + 1);
+            if (!flat && i + 1 < a.size()) out += ',';
+        }
+        if (!flat && !a.empty()) out += "\n" + pad;
+        out += ']';
+    } else if (v.IsObject()) {
+        const auto& o = v.Get<Value::Object>();
+        out += '{';
+        size_t i = 0;
+        for (const auto& [k, e] : o) {
+            out += "\n" + pad2 + "\"" + k + "\": ";
+            writeJson(out, e, indent + 1);
+            if (++i < o.size()) out += ',';
+        }
+        if (!o.empty()) out += "\n" + pad;
+        out += '}';
+    } else {
+        out += "null";
+    }
+}
+
 } // namespace
 
 bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& pngDir, std::string& err) {
@@ -225,12 +374,16 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
     if (!codec) return false;
     const bool v2 = codec->name() != "babylon-ntc-v1";
     const bool specGloss = opts.specGloss != "ignore";
+    const std::string tag = opts.tag.empty() ? "neural" : opts.tag;
     std::printf("  codec %s on %s\n", codec->name().c_str(), codec->deviceDescription().c_str());
 
     auto& m = doc.model;
+    // Plain-glTF copy of the input, filled with the decoded textures of every encoded material.
+    std::unique_ptr<Document> baked;
+    if (!opts.bakedPath.empty()) baked = std::make_unique<Document>(doc);
     if (!pngDir.empty()) {
         fs::create_directories(toPath(pngDir) / "original");
-        fs::create_directories(toPath(pngDir) / "neural");
+        fs::create_directories(toPath(pngDir) / tag);
     }
     const int latentSampler = doc.addSampler(GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR, GL_REPEAT, GL_REPEAT);
     Placeholders ph{doc, doc.addSampler(GL_LINEAR, GL_LINEAR_MIPMAP_LINEAR, GL_REPEAT, GL_REPEAT)};
@@ -251,11 +404,29 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         return true;
     };
 
+    auto selected = [&](size_t mi) {
+        if (opts.materials.empty()) return true;
+        const std::string name = m.materials[mi].name.empty() ? "material" + std::to_string(mi) : m.materials[mi].name;
+        return std::find(opts.materials.begin(), opts.materials.end(), name) != opts.materials.end();
+    };
+    if (!opts.materials.empty()) {
+        for (const std::string& want : opts.materials) {
+            bool found = false;
+            for (size_t mi = 0; mi < m.materials.size(); ++mi)
+                found = found || m.materials[mi].name == want || (m.materials[mi].name.empty() && want == "material" + std::to_string(mi));
+            if (!found) {
+                err = "--neural-materials: no material named '" + want + "'";
+                return false;
+            }
+        }
+    }
+
     size_t count = 0, index = 0;
-    for (auto& mat : m.materials) {
+    for (size_t mi = 0; mi < m.materials.size(); ++mi) {
+        if (!selected(mi)) continue;
         Slot slots[SlotCount];
         bool unsupported[SlotCount]{};
-        gatherSlots(mat, v2, specGloss, slots, unsupported);
+        gatherSlots(m.materials[mi], v2, specGloss, slots, unsupported);
         for (const Slot& s : slots)
             if (s.tex >= 0) {
                 ++count;
@@ -263,7 +434,11 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
             }
     }
 
+    Value::Array materialMetrics;
+    bool anyBakeOnly = false;
+    const auto passStart = std::chrono::steady_clock::now();
     for (size_t mi = 0; mi < m.materials.size(); ++mi) {
+        if (!selected(mi)) continue;
         auto& mat = m.materials[mi];
         Slot slots[SlotCount];
         bool unsupported[SlotCount]{};
@@ -341,7 +516,12 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
         in.width = w;
         in.height = h;
         in.outputs = N;
+        in.layout = layout;
         for (int i = 0; i < N; ++i) in.lossWeights[i] = ch.list[i].active ? kLossWeights[layout.canonical[i]] : 0.0f;
+        if (codec->usesWorkDir() && !opts.workDir.empty()) {
+            in.workDir = fromPath(toPath(opts.workDir) / sanitizeFileName(std::to_string(mi) + "_" + label));
+            fs::create_directories(toPath(in.workDir));
+        }
 
         const size_t n = size_t(w) * h;
         in.target.resize(n * N);
@@ -363,10 +543,17 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
             err = label + ": " + err;
             return false;
         }
+        const double encodeSeconds = secondsSince(t0);
+        const bool bakeOnly = res.bakeOnly;
 
+        size_t latentBytes = 0, weightBytes = 0;
+        if (bakeOnly) {
+            anyBakeOnly = true;
+            // No glTF representation: plain textures replace the slots in the output itself.
+            bakeSlots(doc, slots, slots, res.decoded, N, w, h, ch, blend, label);
+        } else {
         // Store latents, weights and the extension.
         Value::Array latents;
-        size_t latentBytes = 0;
         static const char* kLatentNames[] = {"hi0", "hi1", "lo0", "lo1"};
         for (size_t i = 0; i < res.latentImages.size(); ++i) {
             auto png = encodePng(res.latentImages[i], 4);
@@ -377,8 +564,8 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
             ti["index"] = Value(doc.addTexture(img, latentSampler, nm));
             latents.emplace_back(std::move(ti));
         }
-        const size_t weightBytes = res.weights.size();
-        if (weightBytes != size_t(1856 + 33 * N) * 4) {
+        weightBytes = res.weights.size();
+        if (weightBytes != codec->expectedWeightCount(N) * 4) {
             err = label + ": unexpected weight count";
             return false;
         }
@@ -437,37 +624,112 @@ bool runNeuralPass(Document& doc, const NeuralOptions& opts, const std::string& 
                 s.setIndex(ph.flatTexture(kind, f.r, f.g, f.b, f.a, f.channels));
             }
         }
+        }
 
-        std::string q = "    PSNR";
-        char buf[64];
+        if (baked) {
+            Slot bslots[SlotCount];
+            bool bunsupported[SlotCount]{};
+            gatherSlots(baked->model.materials[mi], v2, specGloss, bslots, bunsupported);
+            bakeSlots(*baked, bslots, slots, res.decoded, N, w, h, ch, blend, label);
+        }
+
+        struct Psnr {
+            const char* name;
+            double db;
+        };
+        std::vector<Psnr> scores;
         auto report = [&](const char* name, int g, int first, int count) {
             if (!ch.has(g) || !ch.list[ch.start[g]].active) return;
-            std::snprintf(buf, sizeof(buf), " %s %.1f dB", name, psnr(res.decoded, in.target, n, N, ch.start[g] + first, count));
-            q += buf;
+            scores.push_back({name, psnr(res.decoded, in.target, n, N, ch.start[g] + first, count)});
         };
         report("base", GBase, 0, 3);
         if (blend) report("alpha", GBase, 3, 1);
         report("normal", GNormal, 0, 2);
         report("occlusion", GOcc, 0, 1);
-        if (ch.has(GRough) && ch.has(GMetal)) {
-            std::snprintf(buf, sizeof(buf), " roughness/metallic %.1f dB", psnr(res.decoded, in.target, n, N, ch.start[GRough], 2));
-            q += buf;
-        }
+        if (ch.has(GRough) && ch.has(GMetal)) scores.push_back({"roughness/metallic", psnr(res.decoded, in.target, n, N, ch.start[GRough], 2)});
         report("emissive", GEmissive, 0, 3);
         report("diffuse", GDiffuse, 0, 3);
         if (blend) report("diffuse alpha", GDiffuse, 3, 1);
         report("specular", GSpec, 0, 3);
         report("glossiness", GGloss, 0, 1);
-        std::printf("%s\n    latents %s + weights %s (%.1f s)\n", q.c_str(), humanBytes(latentBytes).c_str(),
-                    humanBytes(weightBytes).c_str(), secondsSince(t0));
+        std::string q = "    PSNR";
+        char buf[64];
+        for (const Psnr& s : scores) {
+            std::snprintf(buf, sizeof(buf), " %s %.1f dB", s.name, s.db);
+            q += buf;
+        }
+        const size_t compressedBytes = res.compressedBytes ? res.compressedBytes : latentBytes + weightBytes;
+        if (bakeOnly)
+            std::printf("%s\n    %s (%.2f bpp, baked, %.1f s)\n", q.c_str(), humanBytes(compressedBytes).c_str(),
+                        8.0 * double(compressedBytes) / double(n), encodeSeconds);
+        else
+            std::printf("%s\n    latents %s + weights %s (%.1f s)\n", q.c_str(), humanBytes(latentBytes).c_str(),
+                        humanBytes(weightBytes).c_str(), encodeSeconds);
+
+        if (!opts.metricsPath.empty()) {
+            Value::Object mm;
+            mm["name"] = Value(label);
+            mm["index"] = Value(int(mi));
+            mm["width"] = Value(w);
+            mm["height"] = Value(h);
+            mm["outputs"] = Value(N);
+            Value::Array canon;
+            for (int i = 0; i < N; ++i) canon.emplace_back(layout.canonical[i]);
+            mm["layout"] = Value(std::move(canon));
+            Value::Array slotNames;
+            for (int id = 0; id < SlotCount; ++id)
+                if (slots[id].active) slotNames.emplace_back(std::string(kSlots[id].kind));
+            mm["slots"] = Value(std::move(slotNames));
+            mm["latentBytes"] = Value(double(latentBytes));
+            mm["weightBytes"] = Value(double(weightBytes));
+            mm["compressedBytes"] = Value(double(compressedBytes));
+            mm["bpp"] = Value(8.0 * double(compressedBytes) / double(n));
+            Value::Object ps;
+            for (const Psnr& s : scores) ps[s.name] = Value(s.db);
+            mm["psnr"] = Value(std::move(ps));
+            mm["encodeSeconds"] = Value(encodeSeconds);
+            mm["bakeOnly"] = Value(bakeOnly);
+            if (!res.extraMetrics.empty()) mm["codecMetrics"] = Value(res.extraMetrics);
+            materialMetrics.emplace_back(std::move(mm));
+        }
 
         if (!pngDir.empty()) {
             const std::string prefix = sanitizeFileName(std::to_string(mi) + "_" + label);
             writeComparisonPngs(toPath(pngDir) / "original", prefix, in.target, N, w, h, ch, blend);
-            writeComparisonPngs(toPath(pngDir) / "neural", prefix, res.decoded, N, w, h, ch, blend);
+            writeComparisonPngs(toPath(pngDir) / tag, prefix, res.decoded, N, w, h, ch, blend);
         }
     }
-    doc.addExtensionUsed(kExtension, false);
+    if (!anyBakeOnly) doc.addExtensionUsed(kExtension, false);
+
+    if (baked) {
+        std::printf("  writing %s\n", opts.bakedPath.c_str());
+        if (!saveGlb(std::move(*baked), opts.bakedPath, err)) return false;
+    }
+    if (!opts.metricsPath.empty()) {
+        Value::Object root;
+        root["tool"] = Value(std::string("gltf-texture-compressor"));
+        root["version"] = Value(std::string(GTC_VERSION));
+        root["gitSha"] = Value(std::string(GTC_GIT_SHA));
+        root["codec"] = Value(codec->name());
+        root["device"] = Value(codec->deviceDescription());
+        root["tag"] = Value(tag);
+        root["commandLine"] = Value(opts.commandLine);
+        root["seed"] = Value(int(opts.seed));
+        root["steps"] = Value(opts.steps);
+        root["batch"] = Value(opts.batch);
+        root["parameters"] = Value(codec->describeParameters());
+        root["totalEncodeSeconds"] = Value(secondsSince(passStart));
+        root["materials"] = Value(std::move(materialMetrics));
+        std::string json;
+        writeJson(json, Value(std::move(root)), 0);
+        std::ofstream f(toPath(opts.metricsPath), std::ios::binary);
+        f << json << "\n";
+        if (!f) {
+            err = "failed to write " + opts.metricsPath;
+            return false;
+        }
+        std::printf("  metrics %s\n", opts.metricsPath.c_str());
+    }
     return true;
 }
 

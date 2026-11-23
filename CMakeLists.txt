@@ -66,3 +66,13 @@ endif()
 target_compile_options(gltf-texture-compressor PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>)
 
 install(TARGETS gltf-texture-compressor RUNTIME DESTINATION bin)
+
+find_package(Git QUIET)
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE GTC_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+if(GTC_GIT_SHA)
+    set_source_files_properties(src/neural_pass.cpp PROPERTIES COMPILE_DEFINITIONS GTC_GIT_SHA="${GTC_GIT_SHA}")
+endif()

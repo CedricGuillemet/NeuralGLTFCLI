@@ -45,15 +45,26 @@ struct NeuralMaterialInput {
     std::string name;
     int width = 0, height = 0;
     int outputs = 0;                                 // N, the number of active output channels
+    NeuralLayout layout;                             // canonical channel of each of the N outputs
     std::vector<float> target;                       // height * width * N, values in [0,1], row 0 = top
     float lossWeights[kMaxNeuralChannels]{};         // per output channel, 0 for unused channels
+    // Per-material scratch directory under the output directory (only set when the codec's
+    // usesWorkDir() is true; created by the caller). Codecs must not use the system temp directory.
+    std::string workDir;
 };
 
 struct NeuralMaterialOutput {
     std::vector<Image> latentImages;    // stored as RGBA8 PNG textures, in order
-    std::vector<uint8_t> weights;       // stored in a bufferView, 1856 + 33 * N floats
+    std::vector<uint8_t> weights;       // stored in a bufferView, expectedWeightCount(N) floats
     tinygltf::Value::Object parameters; // codec specific fields merged into the extension
     std::vector<float> decoded;         // height * width * N reconstruction at texel centers
+    // Compressed size of the material as the codec defines it; 0 means latent PNG bytes + weight bytes.
+    size_t compressedBytes = 0;
+    // The codec has no glTF representation: no extension and no placeholders are written, the
+    // material's slots are replaced by plain PNG textures built from `decoded`.
+    bool bakeOnly = false;
+    // Codec specific numbers for the metrics sidecar (e.g. the tool's own PSNR).
+    tinygltf::Value::Object extraMetrics;
 };
 
 class INeuralCodec {
@@ -61,6 +72,12 @@ public:
     virtual ~INeuralCodec() = default;
     virtual std::string name() const = 0;
     virtual std::string deviceDescription() const = 0;
+    // Weight floats expected in NeuralMaterialOutput::weights for N outputs (skipped when bakeOnly).
+    virtual size_t expectedWeightCount(int outputs) const { return size_t(1856) + 33 * size_t(outputs); }
+    // True if encode() uses NeuralMaterialInput::workDir.
+    virtual bool usesWorkDir() const { return false; }
+    // Full parameter set, written to the metrics sidecar.
+    virtual tinygltf::Value::Object describeParameters() const { return {}; }
     virtual bool encode(const NeuralMaterialInput& in, NeuralMaterialOutput& out, std::string& err) = 0;
 };
 

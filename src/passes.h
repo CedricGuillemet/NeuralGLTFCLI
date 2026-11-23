@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace gtc {
 
@@ -31,6 +32,15 @@ struct NeuralOptions {
     uint32_t seed = 1;
     int cudaDevice = 0;
     int fallbackSize = 0; // 0: 1x1 flat placeholders, otherwise downscaled originals
+
+    // Output naming and extras. The pass writes nothing itself except the PNG folder, the work
+    // directories and the optional files below; main() writes <stem>_<tag>.glb.
+    std::string tag = "neural";           // output name <stem>_<tag>.glb and PNG subfolder <png>/<tag>/
+    std::vector<std::string> materials;   // only encode these materials (empty: all)
+    std::string bakedPath;                // if set, also write the plain-glTF (baked) version here
+    std::string metricsPath;              // if set, write the metrics sidecar JSON here
+    std::string workDir;                  // per-material scratch directories are created under this
+    std::string commandLine;              // recorded in the metrics
 };
 
 inline double secondsSince(std::chrono::steady_clock::time_point t0) {
