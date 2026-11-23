@@ -132,6 +132,7 @@ struct Group {
 std::vector<Group> groupsFor(int N) {
     if (N == 20) return {{"baseColor", 0, 4}, {"normal", 4, 2}, {"occlusion", 6, 1}, {"roughness", 7, 1}, {"metallic", 8, 1}, {"emissive", 9, 3}, {"diffuse", 12, 4}, {"specular", 16, 3}, {"glossiness", 19, 1}};
     if (N == 9) return {{"baseColor", 0, 4}, {"normal", 4, 2}, {"occlusion", 6, 1}, {"roughness", 7, 1}, {"metallic", 8, 1}};
+    if (N == 8) return {{"baseColor", 0, 3}, {"normal", 3, 2}, {"occlusion", 5, 1}, {"roughness", 6, 1}, {"metallic", 7, 1}};
     if (N == 4) return {{"baseColor", 0, 4}};
     return {{"occlusion", 0, N}};
 }
@@ -139,6 +140,7 @@ std::vector<Group> groupsFor(int N) {
 std::vector<std::string> replacedFor(int N) {
     if (N == 20) return {"baseColorTexture", "normalTexture", "occlusionTexture", "metallicRoughnessTexture", "emissiveTexture", "KHR_materials_pbrSpecularGlossiness.diffuseTexture", "KHR_materials_pbrSpecularGlossiness.specularGlossinessTexture"};
     if (N == 9) return {"baseColorTexture", "normalTexture", "occlusionTexture", "metallicRoughnessTexture"};
+    if (N == 8) return {"baseColorTexture", "normalTexture", "occlusionTexture", "metallicRoughnessTexture"};
     if (N == 4) return {"baseColorTexture"};
     return {"occlusionTexture"};
 }

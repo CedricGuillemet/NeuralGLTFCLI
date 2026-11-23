@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <thread>
@@ -248,6 +249,12 @@ public:
                 err = "internal error: fp16 weight serialisation does not round-trip";
                 return false;
             }
+        }
+
+        // Hidden: dump the trained model as a golden case (tests/golden/v4/trained_leather).
+        if (const char* gd = std::getenv("GTC_V4_GOLDEN_DIR")) {
+            const char* gn = std::getenv("GTC_V4_GOLDEN_NAME");
+            if (!writeGoldenCase(gd, gn ? gn : "trained", model, 1234, err)) return false;
         }
 
         RefDecoder ref(model);
