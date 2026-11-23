@@ -201,11 +201,19 @@ private:
 } // namespace
 
 std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::string& err) {
+    if (opts.codec == "nvidia-ntc") {
+#ifdef GTC_WITH_NVIDIA_NTC
+        return createNvidiaNtcCodec(opts, err);
+#else
+        err = "the nvidia-ntc codec is not built in; reconfigure with -DGTC_WITH_NVIDIA_NTC=ON";
+        return nullptr;
+#endif
+    }
     NeuralCodecVersion version;
     if (opts.codec == "babylon-ntc-v1") version = NeuralCodecVersion::V1;
     else if (opts.codec == "babylon-ntc-v2" || opts.codec == "babylon-ntc-v3") version = opts.codec == "babylon-ntc-v3" ? NeuralCodecVersion::V3 : NeuralCodecVersion::V2;
     else {
-        err = "unknown neural codec '" + opts.codec + "' (available: babylon-ntc-v1, babylon-ntc-v2, babylon-ntc-v3)";
+        err = "unknown neural codec '" + opts.codec + "' (available: nvidia-ntc, babylon-ntc-v1, babylon-ntc-v2, babylon-ntc-v3)";
         return nullptr;
     }
     NeuralPreset preset;
@@ -218,7 +226,6 @@ std::unique_ptr<INeuralCodec> createNeuralCodec(const NeuralOptions& opts, std::
         }
         version = NeuralCodecVersion::V3; // a custom network shape is only representable in v3
     }
-    return std::make_unique<BabylonNtc>(preset, version);
-}
+    return std::make_unique<BabylonNtc>(preset, version);}
 
 } // namespace gtc
