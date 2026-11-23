@@ -30,8 +30,8 @@ struct V4Preset {
     int c1 = 16, b1 = 4;
     int stepsA = 40000, stepsB = 2000, batch = 1 << 16;
     int activation = 0;                // trainer: 0 hardGELU, 1 hard-swish, 2 SiLU (files are always hardGELU)
-    float lrLatent = 0.01f, lrMlp = 0.005f, lrB = 0.001f;
-    float initLatent = 0.0f, uniformMip = 0.05f, inside = 0.98f, noise = 1.0f;
+    float lrLatent = 0.02f, lrMlp = 0.005f, lrB = 0.001f;
+    float initLatent = 0.0f, uniformMip = 0.0f, inside = 0.98f, noise = 1.0f, mip0 = 0.9f;
     int levelCap = 64;
     bool constElision = true;
     bool noRef = false;                // experiments with a non-standard activation: skip the reference decode

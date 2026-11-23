@@ -40,6 +40,7 @@ struct Params {
     float insideP = 0.98f;        // fraction of samples taken inside the UV mask
     float initLatent = 0.0f;      // latents start at U(-x, x)
     float noiseScale = 1.0f;      // training noise amplitude in units of the quantisation step
+    float mip0P = 0.75f;          // probability that a non-uniform step trains mip 0 (the others follow a geometric law)
 };
 
 struct Weights {

@@ -199,13 +199,15 @@ bool resolveV4Preset(const NeuralOptions& o, V4Preset& v, std::string& err) {
     v.name = name;
     // div0, c0, b0, c1, b1
     if (name == "v4xs") v.div0 = 4, v.c0 = 8, v.b0 = 2, v.c1 = 12, v.b1 = 4;
-    else if (name == "v4s") v.div0 = 4, v.c0 = 12, v.b0 = 4, v.c1 = 16, v.b1 = 4;
+    else if (name == "v4s") v.div0 = 4, v.c0 = 24, v.b0 = 2, v.c1 = 12, v.b1 = 4;
     else if (name == "v4m") v.div0 = 2, v.c0 = 12, v.b0 = 2, v.c1 = 10, v.b1 = 4;
     else if (name == "v4l") v.div0 = 2, v.c0 = 16, v.b0 = 4, v.c1 = 12, v.b1 = 4;
     else {
         err = "unknown --neural-preset '" + name + "' for babylon-ntc-v4 (v4xs, v4s, v4m, v4l)";
         return false;
     }
+    // E7: the logistic output helps every group except metallic (near-binary) and the unused groups
+    for (int i = 0; i < ntc::kOutputs; ++i) v.sigmoid[i] = i <= 7;
     v.seed = o.seed;
     v.device = o.cudaDevice;
     v.constElision = !o.noConst;
@@ -267,7 +269,7 @@ bool resolveV4Preset(const NeuralOptions& o, V4Preset& v, std::string& err) {
         const auto kv = split(item, '=');
         float x = 0;
         if (kv.size() != 2 || !toFloat(kv[1], x)) {
-            err = "--neural-tune expects key=value pairs (lrLatent, lrMlp, lrB, init, uniformMip, inside, noise, levelCap, stepsB, noRef)";
+            err = "--neural-tune expects key=value pairs (lrLatent, lrMlp, lrB, init, uniformMip, mip0, inside, noise, levelCap, stepsB, noRef)";
             return false;
         }
         const std::string& k = kv[0];
@@ -278,6 +280,7 @@ bool resolveV4Preset(const NeuralOptions& o, V4Preset& v, std::string& err) {
         else if (k == "uniformMip") v.uniformMip = x;
         else if (k == "inside") v.inside = x;
         else if (k == "noise") v.noise = x;
+        else if (k == "mip0") v.mip0 = x;
         else if (k == "levelCap") v.levelCap = int(x);
         else if (k == "stepsB") v.stepsB = int(x), stepsBSet = true;
         else if (k == "noRef") v.noRef = x != 0;

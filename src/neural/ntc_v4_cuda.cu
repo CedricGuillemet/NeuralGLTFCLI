@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <random>
 #include <stdexcept>
@@ -211,16 +212,16 @@ __global__ void scatterK(const int* smp, const float* dX, float* g0, float* g1, 
 }
 
 __global__ void biasActK(float* Z, float* A, const float* b, int out, size_t total, int act) {
-    const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i >= total) return;
-    const float z = Z[i] + b[i % out];
+    const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= uint32_t(total)) return;
+    const float z = Z[i] + b[i % uint32_t(out)];
     Z[i] = z;
     if (A) A[i] = activate(z, act);
 }
 
 __global__ void dActK(float* dA, const float* Z, size_t total, int act) {
-    const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
-    if (i >= total) return;
+    const uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= uint32_t(total)) return;
     dA[i] *= dActivate(Z[i], act);
 }
 
@@ -683,13 +684,15 @@ bool train(const Shape& s, const std::vector<float>& target, const float* lossWe
         auto pickMip = [&]() {
             const float u = float(mrng() >> 8) * (1.0f / 16777216.0f);
             if (u < p.uniformMipP) return int(mrng() % uint32_t(s.M));
+            const float u2 = float(mrng() >> 8) * (1.0f / 16777216.0f);
             const double x = (double(mrng() >> 8) + 1.0) / 16777217.0;
-            return std::min(s.M - 1, int(std::floor(-std::log(x) / std::log(4.0))));
+            if (u2 < p.mip0P || s.M == 1) return 0;
+            return std::min(s.M - 1, 1 + int(std::floor(-std::log(x) / std::log(4.0))));
         };
         dev.clearLoss();
         for (int step = 0; step < p.stepsA; ++step) {
             const int m = pickMip();
-            dev.sample(cap, m, p.seed, uint32_t(step), 0.98f, false, 0);
+            dev.sample(cap, m, p.seed, uint32_t(step), p.insideP, false, 0);
             dev.noise(p.seed, uint32_t(step), p.noiseScale);
             dev.trainStep(cap, true, step, cosine(p.lrMlp, step, p.stepsA), cosine(p.lrLatent, step, p.stepsA), p.seed);
             ++sinceReport;
@@ -713,7 +716,7 @@ bool train(const Shape& s, const std::vector<float>& target, const float* lossWe
         sinceReport = 0;
         for (int step = 0; step < p.stepsB; ++step) {
             const int m = pickMip();
-            dev.sample(cap, m, p.seed + 999u, uint32_t(step), 0.98f, false, 0);
+            dev.sample(cap, m, p.seed + 999u, uint32_t(step), p.insideP, false, 0);
             dev.trainStep(cap, false, step, cosine(p.lrB, step, p.stepsB), 0.0f, p.seed);
             ++sinceReport;
             if ((step + 1) % 250 == 0 || step + 1 == p.stepsB) {

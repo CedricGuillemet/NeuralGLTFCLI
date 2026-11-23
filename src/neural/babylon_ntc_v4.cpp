@@ -121,6 +121,7 @@ public:
         o["uniformMip"] = Value(double(p_.uniformMip));
         o["maskInside"] = Value(double(p_.inside));
         o["noise"] = Value(double(p_.noise));
+        o["mip0"] = Value(double(p_.mip0));
         o["levelCap"] = Value(p_.levelCap);
         o["constElision"] = Value(p_.constElision);
         Value::Array sig;
@@ -213,7 +214,7 @@ public:
         v4cuda::Params tp;
         tp.stepsA = p_.stepsA, tp.stepsB = p_.stepsB, tp.batch = p_.batch, tp.device = p_.device, tp.seed = p_.seed;
         tp.lrLatent = p_.lrLatent, tp.lrMlp = p_.lrMlp, tp.lrB = p_.lrB;
-        tp.activation = p_.activation, tp.uniformMipP = p_.uniformMip, tp.insideP = p_.inside, tp.initLatent = p_.initLatent, tp.noiseScale = p_.noise;
+        tp.activation = p_.activation, tp.uniformMipP = p_.uniformMip, tp.insideP = p_.inside, tp.initLatent = p_.initLatent, tp.noiseScale = p_.noise, tp.mip0P = p_.mip0;
 
         auto t0 = std::chrono::steady_clock::now();
         auto progress = [&](int phase, int step, int total, float loss) {
