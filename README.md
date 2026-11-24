@@ -153,14 +153,14 @@ Per-group PSNR (dB) of the decoded neural textures against the sources, per mate
 
 ## Legacy neural quality and size (babylon-ntc-v2)
 
-The size of a neural material is fixed by the preset, not by the content. The default (`v2best`) keeps two 8-channel 8-bit latent grids at 1/4 and 1/16 of the texture resolution: for a 2048x2048 material that is 512x512x8 + 128x128x8 bytes = 2.13 MiB, plus about 8 KiB of MLP weights. Measured PSNR on the results above ranges from about 26 dB to 58 dB per channel, with most channels between 30 and 45 dB.
+This section covers the legacy `babylon-ntc-v2`/`v3` codecs (`--neural-codec babylon-ntc-v2`); the default codec is now `babylon-ntc-v4` with the `v4s` preset (see [Neural codec](#babylon-ntc-v4-default)). The size of a neural material is fixed by the preset, not by the content. The legacy `v2best` preset keeps two 8-channel 8-bit latent grids at 1/4 and 1/16 of the texture resolution: for a 2048x2048 material that is 512x512x8 + 128x128x8 bytes = 2.13 MiB, plus about 8 KiB of MLP weights. Measured PSNR on the results above ranges from about 26 dB to 58 dB per channel, with most channels between 30 and 45 dB.
 
 Quality presets (`--neural-preset`), measured on FlightHelmet `LeatherPartsMat` (2048x2048, UV-masked PSNR, 24000 steps, seed 1; see `tools/quality/experiment.py` and `output/quality/experiments.csv`):
 
 | Preset | Latents per material | Base / normal PSNR (masked) | Training time (RTX 4060) |
 |---|---|---|---|
 | `v2` (legacy, 6000 steps) | 2.13 MiB, 8-bit | 33.3 / 27.1 dB | 26 s |
-| `v2best` (default) | 2.13 MiB, 8-bit | 33.2 / 29.3 dB (+3.2 dB normal vs `v2` on the same mask) | 95 s |
+| `v2best` (former default) | 2.13 MiB, 8-bit | 33.2 / 29.3 dB (+3.2 dB normal vs `v2` on the same mask) | 95 s |
 | `v3s` | 2.1 MiB, 4-bit | 34.8 / 31.7 dB | 6 min |
 | `v3m` | 3.1 MiB | 36.1 / 33.4 dB | 6.5 min |
 | `v3l` | 6.1 MiB | 42.7 / 37.1 dB | 7.5 min |
@@ -194,7 +194,18 @@ Possible improvements, not implemented yet:
 - Channels that are constant over the UV-covered texels are stored as constants and not predicted by the network; texels outside the UV islands are zeroed so the latent PNGs compress better.
 - Forward and backward passes use cuBLAS (FP32) and hand-written CUDA kernels.
 - The decoder is specified exactly in [the spec](docs/BABYLON_materials_neural_texture.md#codec-babylon-ntc-v4); `src/neural/ntc_v4_ref.cpp` is the CPU reference decoder, and the encoder checks the GPU decode against it before writing the file. `tests/golden/v4/` holds golden vectors for other implementations.
-- Presets: `v4xs`, `v4s` (default), `v4m`, `v4l`.
+- Presets: `v4xs`, `v4s` (default), `v4m`, `v4l` (sizes and quality in [the spec](docs/BABYLON_materials_neural_texture.md#presets)).
+
+The preset also sets the runtime cost when a renderer decodes per pixel. Each grid texel is `channels x bits` bits packed into `ceil(channels x bits / 32)` RGBA8 latent images; one network evaluation fetches 4 texels (2x2) from every grid 0 image and 4 texels (bilinear) from every grid 1 image, then runs IN -> 64 -> 64 -> N (N = encoded channels, 9 below). One evaluation decodes the whole PBR set of the material.
+
+| Preset | G0 images | G1 images | Latent fetches per evaluation | IN | MACs per evaluation (N = 9) |
+|---|---|---|---|---|---|
+| `v4xs` | 1 (8 ch x 2 bit) | 2 (12 ch x 4 bit) | 12 | 57 | 8,320 |
+| `v4s` (default) | 2 (24 ch x 2 bit) | 2 (12 ch x 4 bit) | 16 | 121 | 12,416 |
+| `v4m` | 1 (12 ch x 2 bit) | 2 (10 ch x 4 bit) | 12 | 71 | 9,216 |
+| `v4l` | 2 (16 ch x 4 bit) | 2 (12 ch x 4 bit) | 16 | 89 | 10,368 |
+
+The filter multiplies the evaluations per pixel: nearest or stochastic x1, bilinear x4, trilinear x8. The fp16 weights (`2 x sum(out x (inStride + 1))` bytes, about 16-25 KiB) are read from a small per-material texture or uniform buffer. Decoding once at load time instead (`--neural-bake` or the loader's bake mode) removes this cost at the price of regular texture memory.
 
 ### nvidia-ntc (opt-in)
 
