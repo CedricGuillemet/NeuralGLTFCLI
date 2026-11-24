@@ -4,7 +4,7 @@ Status: experimental vendor extension, written by `gltf-texture-compressor`. Not
 
 ## Overview
 
-This material extension replaces some or all of a material's core PBR textures with a neural texture: a codec-defined payload that a renderer decodes per pixel (in the fragment shader or once at load time) and uses in place of the original textures. The `babylon-ntc-*` codecs store low-resolution latent images plus a small multilayer perceptron (MLP) as ordinary glTF images and buffer views; `nvidia-ntc-0.10` embeds an NVIDIA Neural Texture Compression (`.ntc`) container in a buffer view.
+This material extension replaces some or all of a material's core PBR textures with a neural texture: a codec-defined payload that a renderer decodes per pixel (in the fragment shader or once at load time) and uses in place of the original textures. The `babylon-ntc-*` codecs store low-resolution latent images plus a small multilayer perceptron (MLP) as ordinary glTF images and buffer views.
 
 The extension is listed in `extensionsUsed` only. Replaced slots still point to valid textures (1x1 placeholders, downscaled originals with `--neural-fallback-size`, or KTX2 textures with `--neural-fallback ktx`), so loaders that ignore it render a plausible approximation.
 
@@ -48,12 +48,10 @@ The extension is listed in `extensionsUsed` only. Replaced slots still point to 
 | Property | Description |
 |---|---|
 | `version` | Extension version, currently 1. |
-| `codec` | Payload layout: `babylon-ntc-v1`, `babylon-ntc-v2`, `babylon-ntc-v3`, `babylon-ntc-v4` (the encoder default) or `nvidia-ntc-0.10`. A reader that does not know the codec must ignore the extension (see [Unknown codecs](#unknown-codecs)). |
+| `codec` | Payload layout: `babylon-ntc-v1`, `babylon-ntc-v2`, `babylon-ntc-v3`, or `babylon-ntc-v4` (the encoder default). A reader that does not know the codec must ignore the extension (see [Unknown codecs](#unknown-codecs)). |
 | `resolution` | Resolution of the source textures (informative). |
 | `latentTextures` | (`babylon-ntc-*`) Texture infos for the latent images, in codec order. They must be sampled as linear data (not sRGB) with bilinear filtering (NEAREST with manual bilinear in v3) and repeat wrapping, using `TEXCOORD_0`. |
 | `weights` | (`babylon-ntc-*`) `bufferView` holding the network parameters: little-endian float32 for v1-v3 (`componentType`, `count`), little-endian float16 for v4 (`byteLength`). |
-| `bitstream` | (`nvidia-ntc-0.10`) `{ "bufferView": n }`: the `.ntc` file. |
-| `ntc` | (`nvidia-ntc-0.10`) Informative container summary. |
 | `outputs` | Network output channel indices for each material property. |
 | `replacedSlots` | Core texture slots whose texture is superseded by the network. Their factors (`baseColorFactor`, `normalTexture.scale`...) still apply to the decoded values. |
 
@@ -205,7 +203,7 @@ A reader supporting v3 must implement the generic packing above (not a fixed sha
 
 ## Codec `babylon-ntc-v4`
 
-`babylon-ntc-v4` is the default codec of the encoder. It is an NTC-style codec after Vaidyanathan et al. 2023, "Random-Access Neural Compression of Material Textures" (arXiv 2305.17105). It is a clean-room implementation written from the paper and from this repository's own code; it is **not compatible with NVIDIA NTC files** (use `nvidia-ntc-0.10` for those). The output channel table (20 canonical channels, `outputs` ranges), the colour spaces, the post-processing (normal Z reconstruction) and the `replacedSlots` rules are identical to v2.
+`babylon-ntc-v4` is the default codec of the encoder. It is an NTC-style codec after Vaidyanathan et al. 2023, "Random-Access Neural Compression of Material Textures" (arXiv 2305.17105). It is a clean-room implementation written from the paper and from this repository's own code; it is **not compatible with NVIDIA NTC files**. The output channel table (20 canonical channels, `outputs` ranges), the colour spaces, the post-processing (normal Z reconstruction) and the `replacedSlots` rules are identical to v2.
 
 | Item | v4 choice | Source |
 |---|---|---|
@@ -363,49 +361,6 @@ A v4 reader must implement the decode above exactly. A reader that does not supp
 
 The encoder reads the material at its native resolution, which must be a multiple of 8 in both axes (the encoder reports an error otherwise); the output textures have the same resolution.
 
-## Codec `nvidia-ntc-0.10`
-
-`nvidia-ntc-0.10` is an opt-in codec of the encoder (`--neural-codec nvidia-ntc`). The material's textures are compressed by NVIDIA's [RTX Neural Texture Compression](https://github.com/NVIDIA-RTX/RTXNTC) SDK (`ntc-cli`, LibNTC 0.10) and the resulting `.ntc` file is embedded **unchanged** in the glb. The codec id names the SDK minor version whose decoder was validated: a future SDK version gets its own id (`nvidia-ntc-0.11`), and a reader only decodes the ids it has validated.
-
-### Example
-
-```json
-"BABYLON_materials_neural_texture": {
-  "version": 1,
-  "codec": "nvidia-ntc-0.10",
-  "resolution": [2048, 2048],
-  "bitstream": { "bufferView": 65 },
-  "ntc": {
-    "containerVersion": 256, "schemaVersion": 3, "numChannels": 10,
-    "gridSizeScale": 3, "numFeatures": 8, "numColorMips": 1,
-    "encoder": "ntc-cli (LibNTC 0.10.1)"
-  },
-  "outputs": { "baseColor": [0, 4], "normal": [4, 2], "occlusion": [6, 1], "roughness": [7, 1], "metallic": [8, 1] },
-  "replacedSlots": ["baseColorTexture", "normalTexture", "occlusionTexture", "metallicRoughnessTexture"]
-}
-```
-
-### Embedding
-
-- `bitstream.bufferView` references a buffer view holding the whole `.ntc` file, byte for byte. The buffer view starts at a 16-byte aligned offset and has no `byteStride` or `target`.
-- `latentTextures`, `weights`, `network` and the other `babylon-ntc-*` properties are absent.
-- `ntc` is informative, except that `containerVersion` and `schemaVersion` must equal the values in the container.
-- The container format is defined by NVIDIA's public [TextureSetFile.md](https://github.com/NVIDIA-RTX/RTXNTC/blob/main/docs/TextureSetFile.md) (header `"NTEX"`, container version `0x100`, JSON descriptor, binary views). The decoding semantics (latent sampling, the MLP and its quantization, positional encoding, colour mips) are defined by NVIDIA's NTC runtime v0.10, not by this document.
-
-### Channels and slots
-
-- `outputs` uses the v2 range semantics `[firstChannel, count]`, where the channels are the channels of the NTC texture set (`numChannels` is 1 to 16). The groups are the v2 groups (`baseColor`, `normal`, `occlusion`, `roughness`, `metallic`, `emissive`, `diffuse`, `specular`, `glossiness`), packed in the v2 canonical order, and each group is one texture of the texture set whose name is the group name (ntc-cli may append `|ntcsem:...`) and whose `firstChannel`/`numChannels` equal the `outputs` entry. `baseColor` is 4 channels (alpha is the fourth), `normal` is 2 (X and Y, Z is reconstructed). The v2 colour-space table and the `replacedSlots` rules apply unchanged.
-- The `numChannels` of the texture set may exceed the last used channel by one (ntc-cli pads odd counts).
-- At most 16 channels fit: groups are added in canonical order until the next one would not fit; the other groups are left as regular textures and are not in `replacedSlots`.
-- Every channel is declared `Linear` in the texture set, and sRGB-encoded sources (base colour, emissive, diffuse, specular) are stored as data. Decoded values are therefore sRGB-encoded, exactly like the v2 outputs.
-
-### Encoder constraints and validation
-
-The encoder writes containers with `--gdeflate none` (no GDeflate views), without BC output (no `bcFormat` or BC mode buffers) and with `numColorMips == 1` unless `--ntc-mips` is given. A reader must reject, and fall back as for [Unknown codecs](#unknown-codecs), a container whose signature is not `"NTEX"`, whose container version is not `0x100`, whose `schemaVersion` is not 3, which uses compression or BC data, or whose channels are not `Linear`. The CLI validates every container before embedding it.
-
-### Fallback textures
-
-By default the replaced slots hold 1x1 placeholders. `--neural-fallback-size <n>` stores downscaled PNG originals, `--neural-fallback ktx` stores KTX2 textures (`KHR_texture_basisu` is then added to `extensionsUsed`, not to `extensionsRequired`), and `--neural-fallback none` leaves the core slots without a texture.
 
 ## Limitations
 
@@ -415,4 +370,3 @@ By default the replaced slots hold 1x1 placeholders. `--neural-fallback-size <n>
 - With `babylon-ntc-v2`, `babylon-ntc-v3` and `babylon-ntc-v4`, materials whose textures are smaller than 64 pixels are not encoded. `babylon-ntc-v4` additionally needs a resolution that is a multiple of 8.
 - `babylon-ntc-v3` needs a reader that implements the generic grid/MLP layout; the Babylon.js loader support for v3 is tracked separately.
 - `babylon-ntc-v4` needs a reader that implements the v4 decode (latent pyramid, fp16 MLP) described above, and a CUDA GPU at encode time.
-- `nvidia-ntc-0.10` needs a reader that implements NVIDIA's NTC 0.10 decoding; it replaces at most 16 output channels per material, and ntc-cli needs an NVIDIA GPU at encode time.

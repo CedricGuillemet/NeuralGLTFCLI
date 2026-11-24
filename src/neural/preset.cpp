@@ -90,7 +90,7 @@ std::string presetNameOf(const NeuralOptions& o) { return o.preset.empty() ? (is
 bool resolveNeuralPreset(const NeuralOptions& o, NeuralPreset& p, std::string& err) {
     const std::string name = presetNameOf(o);
     const bool v4Name = name.rfind("v4", 0) == 0;
-    if (v4Name != isV4Codec(o) && o.codec != "nvidia-ntc") {
+    if (v4Name != isV4Codec(o)) {
         err = std::string(v4Name ? "the v4 presets (v4xs, v4s, v4m, v4l) need --neural-codec babylon-ntc-v4"
                                  : "--neural-preset '" + name + "' belongs to the legacy codecs; babylon-ntc-v4 takes v4xs, v4s, v4m or v4l");
         return false;

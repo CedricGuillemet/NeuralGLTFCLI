@@ -26,7 +26,7 @@ struct KtxOptions {
 };
 
 struct NeuralOptions {
-    std::string codec = "babylon-ntc-v4"; // babylon-ntc-v4 (default), nvidia-ntc (opt-in benchmark codec), or the legacy babylon-ntc-v1/v2/v3
+    std::string codec = "babylon-ntc-v4"; // babylon-ntc-v4 (default) or the legacy babylon-ntc-v1/v2/v3
     std::string specGloss = "encode"; // encode: also encode KHR_materials_pbrSpecularGlossiness textures (v2), ignore: leave them
     int steps = 6000;
     int batch = 1 << 17;
@@ -59,23 +59,11 @@ struct NeuralOptions {
     std::string quant;           // noise, ste
 
     // Output naming and extras. The pass writes nothing itself except the PNG folder, the work
-    // directories and the optional files below; main() writes <stem>_<tag>.glb.
+    // optional files below; main() writes <stem>_<tag>.glb.
     std::string tag = "neural";           // output name <stem>_<tag>.glb and PNG subfolder <png>/<tag>/
     std::vector<std::string> materials;   // only encode these materials (empty: all)
-    std::string bakedPath;                // if set, also write the plain-glTF (baked) version here
     std::string metricsPath;              // if set, write the metrics sidecar JSON here
-    std::string workDir;                  // per-material scratch directories are created under this
     std::string commandLine;              // recorded in the metrics
-
-    // "nvidia-ntc" codec (the default, runs the external RTXNTC ntc-cli).
-    std::string ntcCli;                   // path to ntc-cli (or the NTC_CLI environment variable, or PATH)
-    double ntcBpp = 4.5;                  // target bits per pixel for every material (snapped to a latent shape)
-    std::string ntcMatch;                 // metrics JSON whose per-material sizes set the target bpp
-    std::string ntcArgs;                  // extra arguments passed to ntc-cli
-    std::string ntcSnap = "nearest";      // nearest: pick the latent shape closest to the target bpp, ntc: ntc-cli -b
-    bool ntcKeepImages = false;           // keep the input/decoded PNGs in the work directory
-    bool ntcMips = false;                 // ntc-cli -g: latent and color mips
-    bool trainingFlagsGiven = false;      // a babylon-ntc training flag was given (ignored by nvidia-ntc)
 };
 
 inline double secondsSince(std::chrono::steady_clock::time_point t0) {

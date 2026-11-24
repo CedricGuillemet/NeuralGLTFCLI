@@ -4,9 +4,9 @@
   experiment.py --cfg a1_mask --flags "--neural-uv-mask on" [--seed 1] [--capture] [--asset flightHelmet]
 
 Steps (every GPU job goes through the lock script when --lock is given):
-  1. gltf-texture-compressor --format neural --neural-suffix <cfg> --neural-bake  (only the Leather material by default)
+  1. gltf-texture-compressor --format neural --neural-suffix <cfg>  (only the Leather material by default)
   2. tools/quality/eval.py  (PSNR / HF-PSNR, plus the UV-masked variants)
-  3. tools/quality/capture.mjs  (--capture: render MAE of the baked glb at the reference viewpoint)
+  3. tools/quality/capture.mjs  (--capture: render MAE of the load-time decoded glb at the reference viewpoint)
 """
 import argparse
 import csv
@@ -67,7 +67,7 @@ def main():
 
     if not a.no_run:
         cmd = [a.exe, glb, "--format", "neural", "--png", pngRoot, "-o", a.out, "--neural-suffix", a.cfg,
-               "--neural-bake", "--seed", str(a.seed)]
+               "--seed", str(a.seed)]
         if a.materials != "all":
             cmd += ["--neural-materials", a.materials]
         cmd += a.flags.split()
@@ -109,7 +109,7 @@ def main():
     row["mae_view2"] = row["maeMesh_view2"] = ""
     if a.capture:
         cap = ["node", os.path.join(HERE, "capture.mjs"), "--out", os.path.join(a.out, "shots"), "--asset", a.asset,
-               "--entry", f"{a.cfg}=baked:{a.cfg}"]
+               "--entry", f"{a.cfg}=loadtime:{a.cfg}"]
         run(gpu(cap), log)
         cj = json.load(open(os.path.join(a.out, "shots", f"captures_webgl_{a.asset}_v2.json")))
         st = cj[a.cfg]["compareStats"]

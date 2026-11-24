@@ -3,10 +3,9 @@
 //
 // Every GPU job must hold the shared lock, so run it through the lock script:
 //   powershell -File files\gpulock.ps1 node tools\quality\capture.mjs --out output\quality\shots \
-//     --entry base=runtime:v2best --entry ktx=ktx --entry baked=baked:v2best
+//     --entry base=runtime:v2best --entry ktx=ktx --entry load=loadtime:v2best
 //
-// An entry is label=mode[:suffix]. Modes: original, ktx, runtime, loadtime (neural, <suffix> as in --neural-suffix),
-// baked (<suffix>_baked.glb written by --neural-bake), nvidia-ntc (suffix = the full file tail after <asset>_).
+// An entry is label=mode[:suffix]. Modes: original, ktx, runtime, loadtime (neural, <suffix> as in --neural-suffix).
 //
 // Environment: BABYLON_NEURAL_DIR (folder with node_modules/@playwright/test and puppeteer, default
 // C:/Users/cedric/dev/babylon-neural), PG_URL (default http://localhost:1338/).
@@ -58,7 +57,7 @@ await page.goto(`${PG}?${q.toString().replace(/webgpu=(&|$)/, "webgpu$1")}#${pgI
 await page.waitForFunction(() => !!window.__neuralCompare, null, { timeout: 180000 });
 await page.evaluate(() => window.__neuralCompare.ready());
 
-const kindOf = { runtime: "neural", loadtime: "neural", baked: "baked", "nvidia-ntc": "ntc" };
+const kindOf = { runtime: "neural", loadtime: "neural" };
 const resultsPath = path.join(outDir, `captures_${engine}_${asset}_v${view}.json`);
 const results = fs.existsSync(resultsPath) ? JSON.parse(fs.readFileSync(resultsPath, "utf8")) : {};
 for (const e of opt.entry) {

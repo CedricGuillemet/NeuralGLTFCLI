@@ -32,9 +32,8 @@ void printUsage() {
         "      --zstd <n>             Zstandard level for UASTC textures, 0 disables (default 18)\n"
         "      --uastc-color          use UASTC for color textures too (higher quality, larger)\n\n"
         "Neural options (the default babylon-ntc-v4 codec needs an NVIDIA GPU and a build with GTC_WITH_CUDA_CODEC=ON):\n"
-        "      --neural-codec <name>  babylon-ntc-v4 (default; clean-room latent pyramid + 64-wide MLP, preset v4s), nvidia-ntc\n"
-        "                             (opt-in; NVIDIA NTC .ntc container embedded in the glb, codec id nvidia-ntc-0.10, needs\n"
-        "                             NVIDIA's ntc-cli), or the legacy CUDA codecs babylon-ntc-v2 (variable outputs), babylon-ntc-v1\n"
+        "      --neural-codec <name>  babylon-ntc-v4 (default; clean-room latent pyramid + 64-wide MLP, preset v4s), or the\n"
+        "                             legacy CUDA codecs babylon-ntc-v2 (variable outputs), babylon-ntc-v1\n"
         "                             (core metal-rough textures only) and babylon-ntc-v3 (these need NTC_SHAPE_SET=all)\n"
         "      --neural-preset <p>    babylon-ntc-v4: v4xs, v4s (default), v4m, v4l; legacy codecs: v2best (default), v2, v3s,\n"
         "                             v3m, v3l, v3x; the flags below override a preset\n"
@@ -48,16 +47,6 @@ void printUsage() {
         "      --neural-out-act <none|sigmoid|group=act,...>   v4: output activation per channel group (base, normal, ...)\n"
         "      --neural-no-const      v4: do not elide constant channels\n"
         "      --neural-tune <k=v,...> v4 experiments: lrLatent, lrMlp, lrB, init, uniformMip, inside, noise, levelCap, stepsB\n"
-        "      --ntc-cli <path>       ntc-cli executable (else the NTC_CLI environment variable, else ntc-cli on PATH;\n"
-        "                             download the RTXNTC SDK from https://github.com/NVIDIA-RTX/RTXNTC/releases)\n"
-        "      --ntc-bpp <x>          target bits per pixel for every material (default 4.5, snapped to the nearest\n"
-        "                             latent shape: 4.5 -> gridSizeScale 3, 8 features, 4.48 bpp)\n"
-        "      --ntc-match <json>     per-material target bpp from a metrics JSON (e.g. a babylon-ntc run's .metrics.json)\n"
-        "      --ntc-args \"<args>\"    extra arguments for ntc-cli (e.g. \"-S 200000\"); -b/-p/--gridSizeScale override the rate\n"
-        "      --ntc-snap <nearest|ntc>\n"
-        "                             nearest (default): latent shape closest to the target bpp; ntc: ntc-cli -b (rounds down)\n"
-        "      --ntc-mips             ntc-cli -g: latent and color mips (the runtime then decodes the sampled mip)\n"
-        "      --ntc-keep-images      keep the input and decoded PNGs in the work directory\n"
         "      --ntc-suffix <s>       deprecated alias of --neural-suffix\n"
         "      --neural-fallback <ktx|png|none>\n"
         "                             what the replaced slots contain for loaders without the extension: png (default:\n"
@@ -68,14 +57,12 @@ void printUsage() {
         "                             max width of the fallback textures\n"
         "      --neural-suffix <s>    name the neural output <name>_neural_<s>.glb (PNGs go in <png dir>/neural_<s>/)\n"
         "                             and also write <name>_neural_<s>.metrics.json\n"
-        "      --neural-bake          also write <name>_neural[_<s>]_baked.glb: the textures decoded by ntc-cli as plain PNG\n"
-        "                             textures in a standard glTF (no extension needed to view it)\n"
         "      --neural-materials <list>\n"
         "                             only encode the comma-separated material names (others are left untouched)\n"
         "      --seed <n>             random seed (default 1)\n"
         "      --cuda-device <n>      CUDA device index (default 0)\n\n"
-        "Legacy babylon-ntc training options (ignored, with a warning, by nvidia-ntc; --steps/--batch/--neural-grids/\n"
-        "--neural-activation also apply to v4 as described above):\n"
+        "Legacy babylon-ntc training options (--steps/--batch/--neural-grids/--neural-activation also apply to v4 as\n"
+        "described above):\n"
         "      --neural-specgloss <encode|ignore>\n"
         "                             v2: encode KHR_materials_pbrSpecularGlossiness textures (default) or leave them\n"
         "      --neural-hidden <n>    MLP width; --neural-layers <n>: hidden layers\n"
@@ -105,7 +92,7 @@ int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::string input, outDir, pngDir, formats = "ktx";
     std::string neuralSuffix;
-    bool png = false, neuralBake = false;
+    bool png = false;
     KtxOptions ktxOpts;
     NeuralOptions nOpts;
 
@@ -133,10 +120,6 @@ int main(int argc, char** argv) {
             if (!gtc::v4::writeSyntheticGoldens(dir, err)) { std::fprintf(stderr, "error: %s\n", err.c_str()); return 1; }
             return 0;
         }
-        if (a == "--steps" || a == "--batch" || a == "--neural-specgloss" ||
-            (a.rfind("--neural-", 0) == 0 && a != "--neural-codec" && a != "--neural-suffix" && a != "--neural-bake" &&
-             a != "--neural-materials" && a != "--neural-fallback" && a != "--neural-fallback-size"))
-            nOpts.trainingFlagsGiven = true;
         if (a == "-f" || a == "--format") formats = next("a format list");
         else if (a == "-o" || a == "--output-dir") outDir = next("a directory");
         else if (a == "--png") {
@@ -188,20 +171,6 @@ int main(int argc, char** argv) {
         }
         else if (a == "--neural-suffix") neuralSuffix = next("a suffix");
         else if (a == "--ntc-suffix") neuralSuffix = next("a suffix");
-        else if (a == "--ntc-cli") nOpts.ntcCli = next("a path");
-        else if (a == "--ntc-bpp") nOpts.ntcBpp = std::atof(next("a number"));
-        else if (a == "--ntc-match") nOpts.ntcMatch = next("a metrics JSON path");
-        else if (a == "--ntc-args") nOpts.ntcArgs = next("an argument string");
-        else if (a == "--ntc-mips") nOpts.ntcMips = true;
-        else if (a == "--ntc-snap") {
-            nOpts.ntcSnap = next("nearest or ntc");
-            if (nOpts.ntcSnap != "nearest" && nOpts.ntcSnap != "ntc") {
-                std::fprintf(stderr, "error: --ntc-snap expects nearest or ntc\n");
-                return 2;
-            }
-        }
-        else if (a == "--ntc-keep-images") nOpts.ntcKeepImages = true;
-        else if (a == "--neural-bake") neuralBake = true;
         else if (a == "--neural-materials") {
             std::string list = next("a comma-separated material list");
             for (size_t s = 0; s <= list.size();) {
@@ -224,12 +193,10 @@ int main(int argc, char** argv) {
         std::string f = formats.substr(s, e - s);
         if (f == "ktx" || f == "ktx2") doKtx = true;
         else if (f == "neural") doNeural = true;
-        else if (f == "nvidia-ntc") { std::fprintf(stderr, "error: -f nvidia-ntc was removed: nvidia-ntc is now the default codec of -f neural\n"); return 2; }
         else { std::fprintf(stderr, "error: unknown format '%s' (expected ktx or neural)\n", f.c_str()); return 2; }
         s = e + 1;
     }
     nOpts.ktxFallback = ktxOpts;
-    if (nOpts.ntcBpp <= 0 && nOpts.ntcMatch.empty()) nOpts.ntcBpp = 4.5;
     if (nOpts.steps < 1 || nOpts.batch < 64) { std::fprintf(stderr, "error: --steps must be >= 1 and --batch >= 64\n"); return 2; }
 
     const fs::path inPath = toPath(input);
@@ -268,11 +235,7 @@ int main(int argc, char** argv) {
     if (doKtx && !run("ktx", [&](Document& d, const std::string& p) { return runKtxPass(d, ktxOpts, p, err); })) return 1;
     if (doNeural) {
         nOpts.tag = neuralSuffix.empty() ? "neural" : "neural_" + neuralSuffix;
-        if (neuralBake) nOpts.bakedPath = fromPath(out / (stem + "_" + nOpts.tag + "_baked.glb"));
-        if (!neuralSuffix.empty() || neuralBake) {
-            nOpts.metricsPath = fromPath(out / (stem + "_" + nOpts.tag + ".metrics.json"));
-            nOpts.workDir = fromPath(out / (stem + "_" + nOpts.tag + "_work"));
-        }
+        if (!neuralSuffix.empty()) nOpts.metricsPath = fromPath(out / (stem + "_" + nOpts.tag + ".metrics.json"));
         std::string cl;
         for (int i = 1; i < argc; ++i) cl += (i > 1 ? " " : "") + std::string(argv[i]);
         nOpts.commandLine = cl;

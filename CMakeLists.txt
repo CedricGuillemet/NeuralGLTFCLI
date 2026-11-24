@@ -7,8 +7,6 @@ endif()
 
 project(gltf-texture-compressor VERSION 0.1.0 LANGUAGES C CXX)
 
-# nvidia-ntc (default neural codec): runs NVIDIA's external ntc-cli; nothing is linked or redistributed.
-option(GTC_WITH_NVIDIA_NTC "Build the nvidia-ntc neural codec (runs the RTXNTC ntc-cli)" ON)
 # Legacy babylon-ntc-v1/v2/v3 CUDA codecs: AUTO builds them when a CUDA toolchain is found.
 set(GTC_WITH_CUDA_CODEC AUTO CACHE STRING "Build the legacy babylon-ntc CUDA codecs (AUTO, ON or OFF)")
 set_property(CACHE GTC_WITH_CUDA_CODEC PROPERTY STRINGS AUTO ON OFF)
@@ -29,8 +27,8 @@ elseif(GTC_WITH_CUDA_CODEC STREQUAL "AUTO")
         set(GTC_CUDA_ENABLED ON)
     endif()
 endif()
-if(NOT GTC_WITH_NVIDIA_NTC AND NOT GTC_CUDA_ENABLED)
-    message(FATAL_ERROR "No neural codec is enabled: use GTC_WITH_NVIDIA_NTC=ON and/or GTC_WITH_CUDA_CODEC=ON|AUTO (with a CUDA toolchain)")
+if(NOT GTC_CUDA_ENABLED)
+    message(FATAL_ERROR "No neural codec is enabled: use GTC_WITH_CUDA_CODEC=ON|AUTO (with a CUDA toolchain)")
 endif()
 if(GTC_CUDA_ENABLED)
     enable_language(CUDA)
@@ -91,11 +89,6 @@ if(MSVC)
     set_source_files_properties(src/neural/ntc_v4_ref.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise")
 else()
     set_source_files_properties(src/neural/ntc_v4_ref.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
-endif()
-
-if(GTC_WITH_NVIDIA_NTC)
-    target_sources(gltf-texture-compressor PRIVATE src/neural/nvidia_ntc.cpp src/neural/ntc_container.cpp)
-    target_compile_definitions(gltf-texture-compressor PRIVATE GTC_WITH_NVIDIA_NTC=1)
 endif()
 
 if(GTC_CUDA_ENABLED)

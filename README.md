@@ -3,11 +3,11 @@
 A standalone command-line tool that re-encodes the textures of a glTF or GLB asset as either:
 
 - **KTX2** (Basis Universal, `KHR_texture_basisu`): ETC1S for color textures, UASTC + Zstandard for normal maps and other linear data, with full mip chains.
-- **Neural textures** (`BABYLON_materials_neural_texture`, experimental): each material's base color, normal, occlusion, roughness, metallic, emissive and spec-gloss (`KHR_materials_pbrSpecularGlossiness` diffuse and specular-glossiness) textures are compressed into latent images plus a tiny MLP trained by our own CUDA code (default codec `babylon-ntc-v4`, an open format written from the [NTC paper](https://arxiv.org/abs/2305.17105); presets `v4xs`, `v4s`, `v4m`, `v4l`). NVIDIA's [RTX Neural Texture Compression](https://github.com/NVIDIA-RTX/RTXNTC) through `ntc-cli` (codec `nvidia-ntc-0.10`) and the legacy `babylon-ntc-v1/v2/v3` codecs are opt-in with `--neural-codec`. See [docs/BABYLON_materials_neural_texture.md](docs/BABYLON_materials_neural_texture.md).
+- **Neural textures** (`BABYLON_materials_neural_texture`, experimental): each material's base color, normal, occlusion, roughness, metallic, emissive and spec-gloss (`KHR_materials_pbrSpecularGlossiness` diffuse and specular-glossiness) textures are compressed into latent images plus a tiny MLP trained by our own CUDA code (default codec `babylon-ntc-v4`, an open format written from the [NTC paper](https://arxiv.org/abs/2305.17105); presets `v4xs`, `v4s`, `v4m`, `v4l`). The legacy `babylon-ntc-v1/v2/v3` codecs are opt-in with `--neural-codec`. See [docs/BABYLON_materials_neural_texture.md](docs/BABYLON_materials_neural_texture.md).
 
 The output is written as `<name>_ktx.glb` and/or `<name>_neural.glb`, and the tool prints the input and output sizes in bytes.
 
-The executable has no Python or DLL dependencies: libktx is linked statically, so KTX encoding works on any machine. Neural encoding with the default `babylon-ntc-v4` codec needs an NVIDIA GPU and a build with CUDA enabled (the CUDA runtime is linked statically; cuBLAS is loaded from the CUDA installation or the driver package at run time). The opt-in `nvidia-ntc` codec needs NVIDIA's `ntc-cli` (see [Neural codec](#neural-codec)); NVIDIA binaries are never part of this repository.
+The executable has no Python or DLL dependencies: libktx is linked statically, so KTX encoding works on any machine. Neural encoding with the default `babylon-ntc-v4` codec needs an NVIDIA GPU and a build with CUDA enabled (the CUDA runtime is linked statically; cuBLAS is loaded from the CUDA installation or the driver package at run time).
 
 ## Usage
 
@@ -21,20 +21,14 @@ gltf-texture-compressor FlightHelmet.glb --format ktx,neural --png
 | `-o, --output-dir <dir>` | Output directory (default: next to the input). |
 | `--png [dir]` | Also write the re-compressed textures and the originals as PNG (default `<output-dir>/<name>_png`), for comparison with image diff tools. |
 | `--etc1s-quality`, `--uastc-level`, `--uastc-rdo`, `--zstd`, `--uastc-color` | KTX2 encoder settings. |
-| `--neural-codec babylon-ntc-v4\|nvidia-ntc\|babylon-ntc-v2\|babylon-ntc-v1\|babylon-ntc-v3` | Neural codec (default `babylon-ntc-v4`). `babylon-ntc-v4` and the legacy `babylon-ntc-*` codecs need a build with `GTC_WITH_CUDA_CODEC`; `nvidia-ntc` needs `ntc-cli` and is described below. |
-| `--ntc-cli <path>` | `ntc-cli` executable. Otherwise the `NTC_CLI` environment variable, then `ntc-cli` on `PATH`. |
-| `--ntc-bpp <x>` | Target bits per pixel for every material (default 4.5, snapped to the nearest latent shape: `--gridSizeScale 3 --numFeatures 8`, 4.48 bpp). |
-| `--ntc-match <json>`, `--ntc-snap nearest\|ntc`, `--ntc-args "<args>"` | Per-material target bpp from a metrics JSON, how the target is snapped to a latent shape, and extra `ntc-cli` arguments (for example `"-S 200000"`; `-b`, `-p` and `--gridSizeScale` override the rate). |
-| `--ntc-mips` | Pass `-g` to `ntc-cli`: latent and colour mips for runtime minification (larger file). |
-| `--ntc-keep-images` | Keep the input and decoded PNGs of each material in the work directory. |
+| `--neural-codec babylon-ntc-v4\|babylon-ntc-v2\|babylon-ntc-v1\|babylon-ntc-v3` | Neural codec (default `babylon-ntc-v4`). All codecs need a build with `GTC_WITH_CUDA_CODEC`. |
 | `--neural-fallback png\|ktx\|none` | What the replaced slots hold for loaders without the extension: 1x1 placeholders or downscaled PNGs (`png`, default), KTX2 textures (`ktx`, via `KHR_texture_basisu`, full size unless `--neural-fallback-size` is given) or no texture in the core slots (`none`). |
 | `--neural-fallback-size <n>` | Keep downscaled originals (max width `n`) in the replaced slots for viewers without the extension, instead of 1x1 placeholders. |
 | `--neural-suffix <s>` | Name the neural output `<name>_neural_<s>.glb`, put the `--png` decoded textures in `neural_<s>/`, and write a `<name>_neural_<s>.metrics.json` sidecar (sizes, bits per pixel, per-group PSNR, encode time, parameters, seed, git SHA). `--ntc-suffix` is a deprecated alias. |
-| `--neural-bake` | Also write `<name>_neural[_<s>]_baked.glb`: the textures decoded by `ntc-cli` stored as plain PNG textures in a standard glTF (no extension needed), equivalent to the load-time bake. |
 | `--neural-materials <a,b>` | Only encode the listed materials; the others keep their original textures. Useful for fast sweeps. |
 | `--seed`, `--cuda-device` | Random seed and CUDA device (both codecs). |
 
-Training options of `babylon-ntc-v4` (not used by `nvidia-ntc`):
+Training options of `babylon-ntc-v4`:
 
 | Option | Description |
 |---|---|
@@ -45,7 +39,7 @@ Training options of `babylon-ntc-v4` (not used by `nvidia-ntc`):
 | `--neural-no-const` | Do not replace constant channels by constants in the JSON (they are then trained like the others). |
 | `--neural-tune key=value,...` | Experiment-only trainer levers (`lrLatent`, `lrMlp`, `lrB`, `init`, `uniformMip`, `mip0`, `inside`, `noise`, `levelCap`, `stepsB`, `noRef`). Files written with a non-default `levelCap` are not valid v4 and `noRef` skips the reference decode (quality numbers are then not measured). |
 
-Legacy `babylon-ntc-v1/v2/v3` training options (not used by `babylon-ntc-v4` and `nvidia-ntc`):
+Legacy `babylon-ntc-v1/v2/v3` training options (not used by `babylon-ntc-v4`):
 
 | Option | Description |
 |---|---|
@@ -82,39 +76,24 @@ Build options:
 
 | Option | Description |
 |---|---|
-| `GTC_WITH_NVIDIA_NTC` (`ON`) | Build the `nvidia-ntc` codec. It only runs the external `ntc-cli`; nothing from NVIDIA is linked or redistributed. |
-| `GTC_WITH_CUDA_CODEC` (`AUTO`) | Build the `babylon-ntc-v4` CUDA codec and the legacy `babylon-ntc-v1/v2/v3` ones. `AUTO` builds them when a CUDA compiler is found, `OFF` gives a CUDA-free build that compiles in seconds. At least one codec must be enabled. |
+| `GTC_WITH_CUDA_CODEC` (`AUTO`) | Build the `babylon-ntc-v4` CUDA codec and the legacy `babylon-ntc-v1/v2/v3` ones. `AUTO` builds them when a CUDA compiler is found; configuration fails without one. |
 | `NTC_SHAPE_SET` (`v4`) | Which kernel shapes of the legacy v2/v3 trainer are compiled. `v4` (default) only compiles the `babylon-ntc-v2` shape (needed by `v2` and `v2best`; the build takes a few minutes); `all` also compiles the v3 shapes (`v3s`/`v3m`/`v3l`/`v3x`; more than an hour). The `babylon-ntc-v4` trainer is not affected. `NTC_ONLY_V2=ON` is a deprecated alias of `v4`. |
 
 The default CUDA targets are Turing, Ampere, Ada and Blackwell (`75-real 86-real 89-real 120`); override with `-DCMAKE_CUDA_ARCHITECTURES=...`. The `babylon-ntc-v4` trainer uses cuBLAS, which is loaded dynamically (`cublas64_*.dll` from the CUDA Toolkit `bin` directory, which must be on `PATH` or next to the executable).
 
 ## Results
 
-All neural results were produced on an NVIDIA GeForce RTX 4060 with `ntc-cli` (LibNTC 0.10.1), the default `nvidia-ntc` codec (`--neural-bake`, 100,000 training steps, `--gridSizeScale 3 --numFeatures 8`, about 4.5 bits per pixel per material). Sizes are in bytes. "v2" is the previous default (`babylon-ntc-v2`, see [Legacy results](#legacy-results-babylon-ntc-v2)).
+All neural results were produced on an NVIDIA GeForce RTX 4060 with the default `babylon-ntc-v4` codec and preset (`v4s`, 40000 training steps). Sizes are in bytes; encode times are wall-clock for the whole asset (one material at a time).
 
-| Asset | KTX2 | nvidia-ntc | vs v2 | vs KTX2 | `.ntc` bytes per material | Encode time | Replaced outputs |
-|---|---:|---:|---:|---:|---|---:|---|
-| FlightHelmet | 31,006,336 | 13,541,012 | 13,078,064 (+3.5%) | -56.3% | 2,346,708 (x4), 601,832 (lenses, 1024x1024) | 350.5 s | 5 full PBR sets |
-| BoomBox | 3,840,832 | 2,558,204 | 2,451,256 (+4.4%) | -33.4% | 2,346,820 | 76.6 s | 1 full PBR set plus emissive |
-| aerobatic_plane | 4,310,560 | 3,714,732 | 3,570,864 (+4.0%) | -13.8% | 2,346,720 | 75.3 s | normal, occlusion, diffuse, specular, glossiness |
-| fish | 22,412,308 | 20,452,652 | 20,020,108 (+2.2%) | -8.7% | 2,346,720-2,346,832 (x4) | 312.2 s | 4 sets (10-13 channels) |
-| haunted_house | 12,822,392 | 8,218,100 | 5,489,832 (+49.7%) | -35.9% | 2,346,964, 2,346,856 | 162.2 s | 16 and 13 channels |
+| Asset | KTX2 | Neural (v4s) | vs KTX2 | Encode time | Replaced outputs |
+|---|---:|---:|---:|---:|---|
+| FlightHelmet | 31,006,336 | 11,886,580 | -61.7% | 1156.1 s | 5 full PBR sets |
+| BoomBox | 3,840,832 | 1,825,680 | -52.5% | 234.5 s | 1 full PBR set plus emissive |
+| aerobatic_plane | 4,310,560 | 3,061,692 | -29.0% | 605.8 s | normal, occlusion, diffuse, specular, glossiness |
+| fish | 22,412,308 | 18,312,600 | -18.3% | 985.6 s | 4 sets (normal, occlusion, emissive, spec-gloss) |
+| haunted_house | 12,822,392 | 5,644,980 | -56.0% | 1138.1 s | 2 sets (all core and spec-gloss groups) |
 
-A 2048x2048 material is 2.24 MiB (about 5% more than the 2.13 MiB of `v2best`) and a 1024x1024 one 0.57 MiB; the size does not depend on the content. haunted_house is larger than with v2 because the first material has 20 channels, and `nvidia-ntc` stores at most 16 per material, so its specular and glossiness textures stay regular textures. `--ntc-mips` (FlightHelmet) adds a pre-filtered mip chain to every `.ntc`: 14,203,404 bytes in total (+4.9%), 2,502,328 bytes per 2048x2048 material.
-
-NTC PSNR (dB) of the decoded textures against the sources, from `ntc-cli`'s own INT8 decode of the whole material, and the mean per group over the materials measured by this tool on the decoded PNGs (UV-masked values are within 1-2 dB). The v2best columns are the same measure for the old codec with `--neural-preset v2best` (24000 steps):
-
-| Asset | NTC overall (INT8) | NTC base / normal / occlusion / roughness+metallic | v2best base / normal / occlusion / roughness+metallic |
-|---|---|---|---|
-| FlightHelmet | 36.5-47.5 (lenses 47.5) | 43.3 / 43.6 / 35.5 / 42.3 | 35.4 / 39.8 / 31.4 / 35.2 |
-| BoomBox | 48.5 | 47.6 / 46.9 / 44.1 / 45.2 | 40.3 / 44.3 / 39.9 / 37.8 |
-| aerobatic_plane | 52.7 | - / 52.0 / 45.7 / - | - / 46.0 / 37.2 / - |
-| fish | 46.3-53.2 | - / 48.2 / 48.8 / - | - / 43.2 / 44.5 / - |
-| haunted_house | 39.8-42.9 | 39.2 / 40.8 / 50.7 / 38.5 | 32.1 / 34.4 / 43.3 / 32.8 |
-
-NTC is 3-8 dB better than `v2best` at about the same size, but encoding takes 70-350 s per asset with one GPU job per material. `ntc-cli` reports PSNR for both its INT8 and FP8 decode paths (within 0.2-1.5 dB of each other); the tables use INT8.
-
-`--gdeflate latents` shrinks the container by only 1.7% (56,924 to 55,928 bytes on a 256x256 five-texture material), so the encoder always writes `--gdeflate none`: a loader would otherwise need GDeflate decompression for a negligible gain.
+See [the runtime cost table](#babylon-ntc-v4-default) for the per-pixel decode cost of each preset.
 
 ## Legacy results (babylon-ntc-v2)
 
@@ -205,17 +184,7 @@ The preset also sets the runtime cost when a renderer decodes per pixel. Each gr
 | `v4m` | 1 (12 ch x 2 bit) | 2 (10 ch x 4 bit) | 12 | 71 | 9,216 |
 | `v4l` | 2 (16 ch x 4 bit) | 2 (12 ch x 4 bit) | 16 | 89 | 10,368 |
 
-The filter multiplies the evaluations per pixel: nearest or stochastic x1, bilinear x4, trilinear x8. The fp16 weights (`2 x sum(out x (inStride + 1))` bytes, about 16-25 KiB) are read from a small per-material texture or uniform buffer. Decoding once at load time instead (`--neural-bake` or the loader's bake mode) removes this cost at the price of regular texture memory.
-
-### nvidia-ntc (opt-in)
-
-`nvidia-ntc` compresses each material with NVIDIA's [RTX Neural Texture Compression](https://github.com/NVIDIA-RTX/RTXNTC) encoder and embeds the resulting `.ntc` file unchanged in a 16-byte aligned glb buffer view (`codec: "nvidia-ntc-0.10"`, see [the spec](docs/BABYLON_materials_neural_texture.md)). Select it with `--neural-codec nvidia-ntc`. The tool never links NVIDIA code: it writes a texture-set manifest per material, runs `ntc-cli`, validates the container it wrote (signature, version, `schemaVersion` 3, no GDeflate or BC data, Linear channels, texture layout), and reads the decoded PNGs back for the PSNR numbers and the `--neural-bake` glb.
-
-- **Installing ntc-cli.** Download the RTXNTC SDK from [the releases page](https://github.com/NVIDIA-RTX/RTXNTC/releases) (version 0.10.x; the tool refuses other versions because the codec id names the validated decoder) and point the tool to `ntc-cli` with `--ntc-cli`, the `NTC_CLI` environment variable or `PATH`. An NVIDIA GPU is needed to encode. NVIDIA binaries are not part of this repository and must not be redistributed with it; check the licence of the SDK before bundling it anywhere.
-- **Rate.** `--ntc-bpp 4.5` (default) selects `--gridSizeScale 3 --numFeatures 8` (4.48 bpp, 2.24 MiB per 2048x2048 material, fixed by the shape and not by the content). `ntc-cli` trains for 100000 steps by default (about 65 s per 2048x2048 material on an RTX 4060).
-- **Channels.** One NTC texture per output group (`baseColor`, `normal`, `occlusion`, `roughness`, `metallic`, `emissive`, `diffuse`, `specular`, `glossiness`), at most 16 channels per material (groups that do not fit stay regular textures).
-- **Containers.** The encoder passes `--gdeflate none` and `-B none`: GDeflate has no WebGL decoder and a JavaScript inflate would add load time for little gain on high-entropy latents. `--ntc-mips` adds latent and colour mips (`-g`).
-- **Fallback.** By default the replaced slots are 1x1 placeholders; `--neural-fallback ktx` keeps KTX2 versions of the original textures for loaders that ignore the extension.
+The filter multiplies the evaluations per pixel: nearest or stochastic x1, bilinear x4, trilinear x8. The fp16 weights (`2 x sum(out x (inStride + 1))` bytes, about 16-25 KiB) are read from a small per-material texture or uniform buffer. Decoding once at load time instead (the loader's bake mode) removes this cost at the price of regular texture memory.
 
 ### babylon-ntc-v1/v2/v3 (legacy, opt-in)
 
@@ -235,8 +204,8 @@ ONNX Runtime was evaluated for a Python-free encoder. It is an inference engine:
 
 ## Limitations
 
-- Neural encoding requires an NVIDIA GPU (and `ntc-cli` for the opt-in `nvidia-ntc` codec). `babylon-ntc-v4` needs resolutions that are a multiple of 8.
+- Neural encoding requires an NVIDIA GPU. `babylon-ntc-v4` needs resolutions that are a multiple of 8.
 - Neural textures skip individual slots that use `KHR_texture_transform` or a `texCoord` other than 0.
 - Assets using `EXT_meshopt_compression` are not supported. Draco-compressed meshes are preserved.
-- `babylon-ntc-v4` files need a loader that implements the v4 decode (see the spec); other loaders ignore the extension and show the fallback textures (use `--neural-fallback ktx` to keep the originals). The same holds for `nvidia-ntc-0.10` (NVIDIA's NTC 0.10 decoding) and `babylon-ntc-v2`; loaders that only know `babylon-ntc-v1` ignore the extension and show the placeholder textures (use `--neural-codec babylon-ntc-v1` for those loaders).
+- `babylon-ntc-v4` files need a loader that implements the v4 decode (see the spec); other loaders ignore the extension and show the fallback textures (use `--neural-fallback ktx` to keep the originals). The same holds for `babylon-ntc-v2`; loaders that only know `babylon-ntc-v1` ignore the extension and show the placeholder textures (use `--neural-codec babylon-ntc-v1` for those loaders).
 - No viewer in this repository supports `BABYLON_materials_neural_texture`; the Babylon.js glTF loader extension is being developed separately.
